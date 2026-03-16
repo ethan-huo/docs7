@@ -14,10 +14,16 @@ docs7 takes ctx7's search index and discards the chunks, keeping only the source
 ## Install
 
 ```bash
+go install github.com/anthropics/docs7@latest
+```
+
+Or build from source:
+
+```bash
 make install
 ```
 
-Requires Go 1.24+. Installs to `bin/docs7`, symlinks to `/usr/local/bin/docs7` if `bin/` isn't in PATH.
+Requires Go 1.24+.
 
 ## Usage
 
