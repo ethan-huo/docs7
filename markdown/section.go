@@ -121,7 +121,7 @@ func ExtractSection(source []byte, h Heading) string {
 	return string(source[h.StartByte:end])
 }
 
-// FormatTOC produces a numbered outline with section line counts.
+// FormatTOC produces a compact numbered outline with section line counts.
 func FormatTOC(source []byte, headings []Heading) string {
 	var b strings.Builder
 	for _, h := range headings {
@@ -130,8 +130,7 @@ func FormatTOC(source []byte, headings []Heading) string {
 			end = len(source)
 		}
 		lines := strings.Count(string(source[h.StartByte:end]), "\n")
-		indent := strings.Repeat("  ", h.Level-1)
-		fmt.Fprintf(&b, "%s%-8s %s  (%d lines)\n", indent, h.Number, h.Text, lines)
+		fmt.Fprintf(&b, "%s %s (%d)\n", h.Number, h.Text, lines)
 	}
 	return b.String()
 }

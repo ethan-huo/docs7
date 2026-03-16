@@ -64,11 +64,11 @@ Documents over 2000 lines are automatically truncated to the first 1000 lines, w
 # View the document outline (section numbers + line counts)
 docs7 read <url> --toc
 # output:
-#   1        Getting Started  (68 lines)
-#     1.1      Installation   (12 lines)
-#     1.2      Quick Start    (25 lines)
-#   2        API Reference    (300 lines)
-#     2.1      Authentication (45 lines)
+#   1 Getting Started (68)
+#   1.1 Installation (12)
+#   1.2 Quick Start (25)
+#   2 API Reference (300)
+#   2.1 Authentication (45)
 
 # Read a specific section by number
 docs7 read <url> -s 1.2

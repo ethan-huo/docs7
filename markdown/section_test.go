@@ -265,12 +265,16 @@ func TestFormatTOC(t *testing.T) {
 	headings := ParseHeadings(src)
 	toc := FormatTOC(src, headings)
 
-	if !strings.Contains(toc, "1.2.1") {
-		t.Error("TOC missing nested heading number")
+	if !strings.Contains(toc, "1.2.1 Hello World") {
+		t.Error("TOC missing nested heading")
 	}
 	lines := strings.Split(strings.TrimSpace(toc), "\n")
 	if len(lines) != 8 {
 		t.Errorf("TOC has %d lines, want 8", len(lines))
+	}
+	// Compact format: no indentation
+	if strings.HasPrefix(lines[1], " ") {
+		t.Errorf("TOC should not have indentation, got: %q", lines[1])
 	}
 }
 
@@ -285,8 +289,9 @@ func TestFormatTOC_ContainsLineCounts(t *testing.T) {
 	src := []byte(testDoc)
 	headings := ParseHeadings(src)
 	toc := FormatTOC(src, headings)
-	if !strings.Contains(toc, "lines)") {
-		t.Error("TOC missing line count annotation")
+	// Compact format: "1.1 Installation (4)"
+	if !strings.Contains(toc, "(") {
+		t.Error("TOC missing line count")
 	}
 }
 
