@@ -90,7 +90,7 @@ func (c *Client) get(path string, params url.Values, out any) error {
 
 func (c *Client) setHeaders(req *http.Request) {
 	req.Header.Set("X-Context7-Source", "cli")
-	req.Header.Set("X-Context7-Client-IDE", "docs7")
+	req.Header.Set("X-Context7-Client-IDE", "ctx")
 	req.Header.Set("X-Context7-Transport", "cli")
 
 	// GetValidToken handles env var, file load, expiry check, and refresh

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/anthropics/docs7/api"
+	"github.com/ethan-huo/ctx/api"
 )
 
 type DocsCmd struct {
@@ -50,7 +50,7 @@ func (c *DocsCmd) Run(client *api.Client) error {
 
 	// Hints
 	fmt.Println("\n---\n")
-	fmt.Println("Use `docs7 read <url>` to fetch full documents:")
+	fmt.Println("Use `ctx read <url>` to fetch full documents:")
 	for _, src := range sources {
 		fmt.Printf("- %s\n", src.url)
 	}

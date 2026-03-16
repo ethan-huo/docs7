@@ -8,24 +8,28 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/anthropics/docs7/api"
+	"github.com/ethan-huo/ctx/api"
 	"golang.org/x/term"
 )
 
 type AuthCmd struct {
-	Ctx7       AuthCtx7Cmd       `cmd:"ctx7" name:"ctx7" help:"Log in to Context7 (opens browser)"`
-	Cloudflare AuthCloudflareCmd `cmd:"cloudflare" help:"Configure Cloudflare Browser Rendering credentials"`
-	Status     AuthStatusCmd     `cmd:"status" help:"Show authentication status for all providers"`
-	Logout     AuthLogoutCmd     `cmd:"logout" help:"Clear stored credentials"`
+	Login  AuthLoginCmd  `cmd:"login" help:"Authenticate with a provider"`
+	Logout AuthLogoutCmd `cmd:"logout" help:"Clear all stored credentials"`
+	Status AuthStatusCmd `cmd:"status" help:"Show authentication status"`
 }
 
-// --- ctx7 ---
+// --- login ---
 
-type AuthCtx7Cmd struct {
+type AuthLoginCmd struct {
+	Ctx7       AuthLoginCtx7Cmd       `cmd:"ctx7" name:"ctx7" help:"Log in to Context7 (opens browser)"`
+	Cloudflare AuthLoginCloudflareCmd `cmd:"cloudflare" help:"Configure Cloudflare Browser Rendering credentials"`
+}
+
+type AuthLoginCtx7Cmd struct {
 	NoBrowser bool `help:"Print URL instead of opening browser" default:"false"`
 }
 
-func (c *AuthCtx7Cmd) Run(client *api.Client) error {
+func (c *AuthLoginCtx7Cmd) Run(client *api.Client) error {
 	if err := api.Login(client.BaseURL, c.NoBrowser); err != nil {
 		return err
 	}
@@ -33,11 +37,9 @@ func (c *AuthCtx7Cmd) Run(client *api.Client) error {
 	return nil
 }
 
-// --- cloudflare ---
+type AuthLoginCloudflareCmd struct{}
 
-type AuthCloudflareCmd struct{}
-
-func (c *AuthCloudflareCmd) Run(_ *api.Client) error {
+func (c *AuthLoginCloudflareCmd) Run(_ *api.Client) error {
 	reader := bufio.NewReader(os.Stdin)
 
 	fmt.Print("Cloudflare Account ID: ")
@@ -75,12 +77,31 @@ func (c *AuthCloudflareCmd) Run(_ *api.Client) error {
 	return nil
 }
 
+// --- logout ---
+
+type AuthLogoutCmd struct{}
+
+func (c *AuthLogoutCmd) Run(_ *api.Client) error {
+	cleared := false
+	if err := api.ClearTokens(); err == nil {
+		fmt.Println("Context7: logged out.")
+		cleared = true
+	}
+	if err := api.ClearCFCredentials(); err == nil {
+		fmt.Println("Cloudflare: credentials removed.")
+		cleared = true
+	}
+	if !cleared {
+		fmt.Println("No credentials to clear.")
+	}
+	return nil
+}
+
 // --- status ---
 
 type AuthStatusCmd struct{}
 
 func (c *AuthStatusCmd) Run(client *api.Client) error {
-	// ctx7
 	token, _ := api.GetValidToken(client.BaseURL)
 	if token != "" {
 		tokens, err := api.LoadTokens()
@@ -100,7 +121,6 @@ func (c *AuthStatusCmd) Run(client *api.Client) error {
 		fmt.Println("Context7:   not authenticated")
 	}
 
-	// cloudflare
 	creds, err := api.LoadCFCredentials()
 	if err == nil {
 		fmt.Printf("Cloudflare: configured (account: %s...)\n", creds.AccountID[:8])
@@ -108,38 +128,5 @@ func (c *AuthStatusCmd) Run(client *api.Client) error {
 		fmt.Println("Cloudflare: not configured")
 	}
 
-	return nil
-}
-
-// --- logout ---
-
-type AuthLogoutCmd struct {
-	Provider string `arg:"" optional:"" help:"Provider to log out (ctx7, cloudflare, or all)" default:"all"`
-}
-
-func (c *AuthLogoutCmd) Run(_ *api.Client) error {
-	switch c.Provider {
-	case "ctx7":
-		if err := api.ClearTokens(); err != nil {
-			fmt.Println("Context7: not logged in.")
-		} else {
-			fmt.Println("Context7: logged out.")
-		}
-	case "cloudflare":
-		if err := api.ClearCFCredentials(); err != nil {
-			fmt.Println("Cloudflare: not configured.")
-		} else {
-			fmt.Println("Cloudflare: credentials removed.")
-		}
-	case "all":
-		if err := api.ClearTokens(); err == nil {
-			fmt.Println("Context7: logged out.")
-		}
-		if err := api.ClearCFCredentials(); err == nil {
-			fmt.Println("Cloudflare: credentials removed.")
-		}
-	default:
-		return fmt.Errorf("unknown provider: %s (use ctx7, cloudflare, or all)", c.Provider)
-	}
 	return nil
 }

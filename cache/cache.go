@@ -37,7 +37,7 @@ type stateFile struct {
 // Dir returns the cache directory. Overridable for testing.
 var Dir = func() string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".cache", "docs7")
+	return filepath.Join(home, ".cache", "ctx")
 }
 
 func statePath() string {

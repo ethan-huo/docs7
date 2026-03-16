@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anthropics/docs7/api"
-	"github.com/anthropics/docs7/cache"
-	"github.com/anthropics/docs7/markdown"
+	"github.com/ethan-huo/ctx/api"
+	"github.com/ethan-huo/ctx/cache"
+	"github.com/ethan-huo/ctx/markdown"
 )
 
 type ReadCmd struct {
@@ -53,7 +53,7 @@ func (c *ReadCmd) Run(_ *api.Client) error {
 
 	if incomplete {
 		content += fmt.Sprintf(
-			"\n---\nContent may be incomplete (JS-rendered page). Use `docs7 read -f %s` for full rendering.\n", url)
+			"\n---\nContent may be incomplete (JS-rendered page). Use `ctx read -f %s` for full rendering.\n", url)
 	}
 
 	return c.output(cacheURL, content)
@@ -231,7 +231,7 @@ func fetchHTTP(url string) (string, error) {
 func fetchCloudflare(url string) (string, error) {
 	creds, err := api.LoadCFCredentials()
 	if err != nil {
-		return "", fmt.Errorf("cloudflare not configured — run `docs7 auth cloudflare` first")
+		return "", fmt.Errorf("cloudflare not configured — run `ctx auth cloudflare` first")
 	}
 	content, err := api.FetchMarkdownCF(creds.AccountID, creds.APIToken, url)
 	if err != nil {

@@ -1,4 +1,4 @@
-# docs7
+# ctx
 
 Library documentation finder — uses [Context7](https://context7.com) index to locate documentation sources, then reads full documents instead of RAG chunks.
 
@@ -9,12 +9,12 @@ Tools like ctx7 and ref both solve "find docs for AI agents" but with trade-offs
 - **ctx7** has great search but returns fragmented RAG chunks (60-200 tokens each)
 - **ref** returns full documents but search accuracy is inconsistent
 
-docs7 takes ctx7's search index and discards the chunks, keeping only the source URLs. Then it reads the full original documents via GitHub API or HTTP with markdown content negotiation.
+ctx takes ctx7's search index and discards the chunks, keeping only the source URLs. Then it reads the full original documents via GitHub API or HTTP with markdown content negotiation.
 
 ## Install
 
 ```bash
-go install github.com/anthropics/docs7@latest
+go install github.com/ethan-huo/ctx@latest
 ```
 
 Or build from source:
@@ -29,31 +29,34 @@ Requires Go 1.24+.
 
 ```bash
 # Find documentation sources for a library
-docs7 docs mlx-swift "GPU stream thread safety"
-docs7 docs sparkle "appcast auto update"
-docs7 docs convex "Swift client authentication"
+ctx docs mlx-swift "GPU stream thread safety"
+ctx docs sparkle "appcast auto update"
+ctx docs convex "Swift client authentication"
 
 # Read a full document
-docs7 read github://ml-explore/mlx-swift/Source/MLX/Documentation.docc/MLXArray.md
-docs7 read https://sparkle-project.org/documentation/index
+ctx read github://ml-explore/mlx-swift/Source/MLX/Documentation.docc/MLXArray.md
+ctx read https://sparkle-project.org/documentation/index
 
 # Find a library by name
-docs7 search react-native
+ctx search react-native
 ```
 
 ## Authentication
 
-docs7 shares credentials with ctx7 (`~/.context7/credentials.json`).
+ctx shares credentials with ctx7 (`~/.context7/credentials.json`).
 
 ```bash
-# Login (opens browser, OAuth PKCE)
-docs7 login
+# Login to Context7 (opens browser, OAuth PKCE)
+ctx auth login ctx7
+
+# Configure Cloudflare Browser Rendering
+ctx auth login cloudflare
 
 # Check status
-docs7 whoami
+ctx auth status
 
-# Logout
-docs7 logout
+# Logout (clears all credentials)
+ctx auth logout
 ```
 
 GitHub reads use your `gh auth` token automatically.

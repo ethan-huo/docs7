@@ -7,33 +7,33 @@ description: >-
   SPAs) with section-level navigation for large pages.
 ---
 
-# docs7 — Library Documentation Finder
+# ctx — Library Documentation Finder
 
 Find library documentation, then read the full source documents. Two-step workflow: **search → read**.
 
-Binary: `docs7`
+Binary: `ctx`
 
 ## Workflow
 
 ### Step 1: Find documentation sources
 
 ```bash
-docs7 docs <library-name> "<query>"
+ctx docs <library-name> "<query>"
 ```
 
 This returns a list of relevant documents with descriptions, plus their URLs.
 
 ```bash
 # Examples
-docs7 docs mlx-swift "GPU stream thread safety"
-docs7 docs sparkle "appcast auto update configuration"
-docs7 docs convex "Swift client authentication"
+ctx docs mlx-swift "GPU stream thread safety"
+ctx docs sparkle "appcast auto update configuration"
+ctx docs convex "Swift client authentication"
 ```
 
 If you already know the library ID (format `/owner/repo`), pass it directly:
 
 ```bash
-docs7 docs /ml-explore/mlx-swift "lazy evaluation"
+ctx docs /ml-explore/mlx-swift "lazy evaluation"
 ```
 
 ### Step 2: Read the full documents
@@ -41,7 +41,7 @@ docs7 docs /ml-explore/mlx-swift "lazy evaluation"
 Pick the most relevant URL(s) from Step 1 and read them:
 
 ```bash
-docs7 read <url>
+ctx read <url>
 ```
 
 The `read` command auto-detects the URL type:
@@ -52,9 +52,9 @@ The `read` command auto-detects the URL type:
 | `https://github.com/.../blob/...` | GitHub API (auto-converted)                                              |
 | `https://...` (serves markdown)   | Direct fetch with `Accept: text/markdown`                                |
 | `https://...` (serves HTML)       | Jina Reader fallback → clean markdown                                    |
-| `https://...` (JS/SPA page)       | `docs7 read -f <url>` → Cloudflare Browser Rendering (full JS rendering) |
+| `https://...` (JS/SPA page)       | `ctx read -f <url>` → Cloudflare Browser Rendering (full JS rendering) |
 
-Results are cached for 1 hour at `~/.cache/docs7/`. Use `--no-cache` to force a fresh fetch.
+Results are cached for 1 hour at `~/.cache/ctx/`. Use `--no-cache` to force a fresh fetch.
 
 ### Navigating large documents
 
@@ -62,7 +62,7 @@ Documents over 2000 lines are automatically truncated to the first 1000 lines, w
 
 ```bash
 # View the document outline (section numbers + line counts)
-docs7 read <url> --toc
+ctx read <url> --toc
 # output:
 #   1 Getting Started (68)
 #   1.1 Installation (12)
@@ -71,16 +71,16 @@ docs7 read <url> --toc
 #   2.1 Authentication (45)
 
 # Read a specific section by number
-docs7 read <url> -s 1.2
+ctx read <url> -s 1.2
 
 # Read multiple sections
-docs7 read <url> -s "1,3.1,6.2"
+ctx read <url> -s "1,3.1,6.2"
 
 # Read a range of sections (by TOC position, inclusive)
-docs7 read <url> -s "1-3"
+ctx read <url> -s "1-3"
 
 # Mix ranges and singles
-docs7 read <url> -s "1-2,3.2-5.1,6.2"
+ctx read <url> -s "1-2,3.2-5.1,6.2"
 ```
 
 Use `--toc` first to find section numbers and estimate size, then `-s` to read specific sections.
@@ -89,7 +89,7 @@ Use `--toc` first to find section numbers and estimate size, then `-s` to read s
 
 ```bash
 # 1. Find
-docs7 docs react "useEffect cleanup async"
+ctx docs react "useEffect cleanup async"
 # output:
 #   1. **React Hooks Reference**
 #      - ...
@@ -97,7 +97,7 @@ docs7 docs react "useEffect cleanup async"
 #   - github://facebook/react/docs/hooks-reference.md
 
 # 2. Read the most relevant one
-docs7 read github://facebook/react/docs/hooks-reference.md
+ctx read github://facebook/react/docs/hooks-reference.md
 ```
 
 ## Writing Good Queries
@@ -115,12 +115,12 @@ Include the programming language or framework name when ambiguous.
 
 ## When to use `search` instead of `docs`
 
-Use `docs7 search` when you need to **find the right library first**, before querying its docs:
+Use `ctx search` when you need to **find the right library first**, before querying its docs:
 
 ```bash
 # "Which library is this?"
-docs7 search swift-testing
-docs7 search convex "mobile client"
+ctx search swift-testing
+ctx search convex "mobile client"
 ```
 
 This returns a ranked list of matching libraries with IDs you can feed to `docs`.

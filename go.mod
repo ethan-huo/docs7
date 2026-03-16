@@ -1,4 +1,4 @@
-module github.com/anthropics/docs7
+module github.com/ethan-huo/ctx
 
 go 1.25.0
 

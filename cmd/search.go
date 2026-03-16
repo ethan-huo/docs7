@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/anthropics/docs7/api"
+	"github.com/ethan-huo/ctx/api"
 )
 
 type SearchCmd struct {
