@@ -92,7 +92,7 @@ func (c *SiteSetCmd) Run(_ *api.Client) error {
 		return fmt.Errorf("reading value: %w", err)
 	}
 
-	return config.UpdateCredentials(func(creds *config.Credentials) {
+	err = config.UpdateCredentials(func(creds *config.Credentials) {
 		if creds.Sites == nil {
 			creds.Sites = make(map[string]config.Site)
 		}
@@ -103,6 +103,11 @@ func (c *SiteSetCmd) Run(_ *api.Client) error {
 		site.Headers[c.Key] = val
 		creds.Sites[c.Domain] = site
 	})
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Set %s for %s.\n", c.Key, c.Domain)
+	return nil
 }
 
 func (c *SiteSetCmd) bulkSet() error {
@@ -116,7 +121,7 @@ func (c *SiteSetCmd) bulkSet() error {
 		return fmt.Errorf("invalid JSON in bulk file: %w", err)
 	}
 
-	return config.UpdateCredentials(func(creds *config.Credentials) {
+	err = config.UpdateCredentials(func(creds *config.Credentials) {
 		if creds.Sites == nil {
 			creds.Sites = make(map[string]config.Site)
 		}
@@ -129,6 +134,11 @@ func (c *SiteSetCmd) bulkSet() error {
 		}
 		creds.Sites[c.Domain] = site
 	})
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Imported %d headers for %s.\n", len(headers), c.Domain)
+	return nil
 }
 
 // --- del ---

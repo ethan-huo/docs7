@@ -60,13 +60,15 @@ func (c *JSONCmd) Run(_ *api.Client) error {
 		return err
 	}
 
+	url := effectiveURL(c.URL, body)
+
 	result, err := client.JSON(context.Background(), c.URL, body)
 	if err != nil {
-		return fmt.Errorf("json extraction from %s failed: %w\nHint: ensure AI model is configured in ~/.config/ctx/credentials.yaml under 'ai:' section.", c.URL, err)
+		return fmt.Errorf("json extraction from %s failed: %w\nHint: ensure AI model is configured in ~/.config/ctx/credentials.yaml under 'ai:' section.", url, err)
 	}
 
 	if len(result) == 0 {
-		fmt.Printf("No data extracted from %s. Try a more specific --prompt or inspect the page with `ctx read %s` first.\n", c.URL, c.URL)
+		fmt.Printf("No data extracted from %s. Try a more specific --prompt or inspect the page with `ctx read %s` first.\n", url, url)
 		return nil
 	}
 

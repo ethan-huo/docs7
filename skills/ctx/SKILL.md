@@ -1,223 +1,102 @@
 ---
 name: ctx
 description: >-
-  Search documentation for libraries, frameworks, SDKs, and APIs by name and query.
-  Read any URL or local file as clean markdown (GitHub, doc sites, JS-rendered SPAs).
-  Navigate large documents with TOC outline and section extraction.
-  Screenshot, extract links, scrape elements, and crawl websites via Cloudflare Browser Rendering.
+  Search and read documentation for libraries, frameworks, SDKs, and APIs by name and query.
+  Read any URL or local file as clean markdown (GitHub repos, doc sites, JS-rendered SPAs).
+  Navigate large documents with TOC and section extraction.
+  Screenshot webpages, extract links, scrape elements by CSS selector, extract structured
+  JSON data, and crawl entire documentation sites.
 ---
 
-# ctx — Library Documentation Finder
+## Core Workflow: search → read
 
-Find library documentation, then read the full source documents. Two-step workflow: **search → read**.
-
-Binary: `ctx`
-
-## Workflow
-
-### Step 1: Find documentation sources
+### 1. Find documentation sources
 
 ```bash
 ctx docs <library-name> "<query>"
 ```
 
-This returns a list of relevant documents with descriptions, plus their URLs.
+Returns relevant document URLs. Be specific with queries — include language/framework name when ambiguous.
 
 ```bash
-# Examples
 ctx docs mlx-swift "GPU stream thread safety"
-ctx docs sparkle "appcast auto update configuration"
-ctx docs convex "Swift client authentication"
+ctx docs react "useEffect cleanup async"
+ctx docs /ml-explore/mlx-swift "lazy evaluation"   # direct library ID
 ```
 
-If you already know the library ID (format `/owner/repo`), pass it directly:
+Use `ctx search <name> [query]` first if you need to find the right library.
 
-```bash
-ctx docs /ml-explore/mlx-swift "lazy evaluation"
-```
-
-### Step 2: Read the full documents
-
-Pick the most relevant URL(s) from Step 1 and read them:
+### 2. Read documents
 
 ```bash
 ctx read <url>
 ```
 
-The `read` command auto-detects the URL type:
+| Flag | Short | Default | Description |
+|---|---|---|---|
+| (positional) | | required | URL or local path (`https://`, `github://`, `file://`, `/path`, `./path`) |
+| `--full` | `-f` | false | Force full JS rendering (skip HTTP attempt, use when page needs JavaScript) |
+| `--no-cache` | | false | Bypass cache, always fetch fresh |
+| `--toc` | | false | Show heading outline with section numbers and line counts |
+| `--section` | `-s` | | Section(s) to extract (e.g. `1`, `1-3`, `1.2,3.1`) |
 
-| URL pattern                       | Strategy                                                                 |
-| --------------------------------- | ------------------------------------------------------------------------ |
-| Local path / `file://`            | Direct file read (no cache)                                              |
-| `github://owner/repo/path`        | GitHub API (authenticated via `gh auth`)                                 |
-| `https://github.com/.../blob/...` | GitHub API (auto-converted)                                              |
-| `https://...` (serves markdown)   | Direct fetch with `Accept: text/markdown`                                |
-| `https://...` (serves HTML)       | Cloudflare Browser Rendering → clean markdown                            |
-| `https://...` (JS/SPA page)       | `ctx read -f <url>` → Cloudflare Browser Rendering (skip HTTP attempt) |
+Auto-detects URL type and fetches accordingly:
+- Local file / `file://` → direct read (always full content, no summary)
+- `github://owner/repo@ref/path` → GitHub API (supports `@ref` for versioned docs)
+- `https://github.com/.../blob/...` → GitHub API (auto-converted)
+- `https://...` (markdown/text/JSON/XML/YAML) → direct fetch
+- `https://...` (HTML/SPA) → full JS rendering fallback; use `-f` to skip the HTTP attempt
 
-Remote results are cached for 1 hour at `~/.cache/ctx/`. Use `--no-cache` to force a fresh fetch.
+**stdout/stderr contract**: stdout is always clean document content. Diagnostic hints (incomplete content, empty page warnings) go to stderr only.
 
-### Navigating large documents
+### 3. Navigate large documents
 
-Documents over 2000 lines are automatically truncated to the first 1000 lines, with a hint appended at the end of stdout. Use `--toc` and `-s` to navigate:
+Documents over 2000 lines produce a **structural summary** instead of the full content. The output starts with `[ctx:summary]` and shows every section heading with line counts and a preview:
 
-```bash
-# View the document outline (section numbers + line counts)
-ctx read <url> --toc
-# output:
-#   1 Getting Started (68)
-#   1.1 Installation (12)
-#   1.2 Quick Start (25)
-#   2 API Reference (300)
-#   2.1 Authentication (45)
+```
+[ctx:summary] 5000 lines, 12 sections. Read sections: ctx read <url> -s <number>
+Full content: ~/.cache/ctx/{hash}.md
 
-# Read a specific section by number
-ctx read <url> -s 1.2
+# 1 Getting Started (45 lines)
+This library provides a unified interface...
+...
 
-# Read multiple sections
-ctx read <url> -s "1,3.1,6.2"
-
-# Read a range of sections (by TOC position, inclusive)
-ctx read <url> -s "1-3"
-
-# Mix ranges and singles
-ctx read <url> -s "1-2,3.2-5.1,6.2"
+## 1.1 Installation (12 lines)
+npm install ctx-render
+...
 ```
 
-Use `--toc` first to find section numbers and estimate size, then `-s` to read specific sections.
+**How to work with summaries**:
+1. Read the summary to understand the full document structure
+2. Use `-s` to read the sections you need: `ctx read <url> -s 2.1`
+3. Combine sections: `ctx read <url> -s "1-3,5.2"`
+4. Or read the cache file path directly for the full raw content
 
-### Putting it together
-
-```bash
-# 1. Find
-ctx docs react "useEffect cleanup async"
-# output:
-#   1. **React Hooks Reference**
-#      - ...
-#   ---
-#   - github://facebook/react/docs/hooks-reference.md
-
-# 2. Read the most relevant one
-ctx read github://facebook/react/docs/hooks-reference.md
-```
-
-## Writing Good Queries
-
-The query directly affects result quality. Be specific.
-
-| Quality | Example                                                          |
-| ------- | ---------------------------------------------------------------- |
-| Good    | `"SwiftUI NavigationStack path binding programmatic navigation"` |
-| Good    | `"Express.js middleware error handling async"`                   |
-| Bad     | `"navigation"`                                                   |
-| Bad     | `"middleware"`                                                   |
-
-Include the programming language or framework name when ambiguous.
-
-## When to use `search` instead of `docs`
-
-Use `ctx search` when you need to **find the right library first**, before querying its docs:
-
-```bash
-# "Which library is this?"
-ctx search swift-testing
-ctx search convex "mobile client"
-```
-
-This returns a ranked list of matching libraries with IDs you can feed to `docs`.
+Use `--toc` for a compact outline without previews.
 
 ## Browser Rendering Commands
 
-All browser rendering commands use Cloudflare Browser Rendering. Requires `ctx auth login cloudflare` first.
+These commands require `ctx auth login cloudflare`. Each has a dedicated reference — read it before first use:
 
-Every command supports `-d` / `--data` for passing the **full CF API request body** as JSON5:
-- Inline: `-d '{url: "https://example.com", cookies: [{name: "sid", value: "abc"}]}'`
-- File reference: `-d @/tmp/request.json`
-- Stdin/heredoc: `-d -`
+| Command | Use when | Reference |
+|---|---|---|
+| `ctx screenshot <url>` | Need visual information (UI, charts, layouts) | references/screenshot.md |
+| `ctx links <url>` | Explore a site's link structure before reading | references/links.md |
+| `ctx scrape <url> -s "selector"` | Extract specific elements (tables, code blocks) | references/scrape.md |
+| `ctx json <url> --prompt "..."` | Extract structured data as JSON | references/json.md |
+| `ctx crawl <url>` | Pull multiple pages from a documentation site | references/crawl.md |
 
-When `-d` is combined with flags, flags override the corresponding fields in the body. Use `-d @session.json` to reuse auth/cookies across multiple requests.
-
-Full CF API parameter reference: https://developers.cloudflare.com/browser-rendering/rest-api/
-
-### Screenshot — capture a webpage as an image
-
-```bash
-ctx screenshot <url>
-ctx screenshot <url> --full-page
-ctx screenshot <url> --selector ".main-content" -o output.png
-
-# Full API control via -d
-ctx screenshot -d '{url: "https://example.com", viewport: {width: 390, height: 844}, screenshotOptions: {type: "jpeg", quality: 80}}'
-```
-
-Output: prints the file path to stdout. The image file can be read by multimodal AI agents.
-
-**When to use**: page has visual information (UI, charts, layouts) that markdown can't capture.
-
-### Links — extract all links from a page
-
-```bash
-ctx links <url>
-ctx links <url> --internal-only
-ctx links <url> --visible-only
-```
-
-Output: one URL per line.
-
-**When to use**: explore a documentation site's structure before selectively reading pages.
-
-### Scrape — extract specific elements by CSS selector
-
-```bash
-ctx scrape <url> -s "h1" -s "p.description"
-ctx scrape <url> -s "table.api-params" --text-only
-```
-
-Output: JSON (or plain text with `--text-only`).
-
-**When to use**: extract specific parts of a page (API tables, code blocks) without full-page markdown.
-
-### Crawl — bulk-crawl a website for documentation
-
-```bash
-ctx crawl <url> --limit 20
-ctx crawl <url> --limit 50 --include "*/api/*" --exclude "*/changelog/*"
-
-# Async mode
-ctx crawl <url> --no-wait       # prints job ID
-ctx crawl <job-id>              # check status / get results
-ctx crawl <job-id> --cancel     # cancel job
-```
-
-Output: markdown content per page, separated by `---`.
-
-**When to use**: pull an entire documentation site for comprehensive context.
-
-### JSON — AI-powered structured data extraction
-
-```bash
-ctx json <url> --prompt "Extract all API endpoints with their HTTP methods and parameters"
-ctx json <url> --prompt "List all pricing tiers" --schema @schema.json
-```
-
-Output: JSON. The AI model is configured globally in `~/.config/ctx/credentials.yaml` under `ai:` and auto-injected.
-
-**When to use**: extract structured data from a page when you need specific fields, not just raw text.
-
-### Site — manage per-domain headers
-
-```bash
-ctx site ls                                          # list domains
-ctx site ls example.com                              # list headers
-ctx site set example.com Authorization "Bearer xxx"  # set header
-ctx site set example.com Cookie @/tmp/cookie.txt     # value from file
-ctx site set example.com @headers.json5              # bulk import
-ctx site del example.com Authorization               # delete header
-ctx site del example.com                             # delete domain
-```
-
-Site headers are auto-injected into all CF requests matching the domain. Use this for persistent auth/cookies.
+All commands support `-d` for full API request body (JSON5, `@file`, or stdin). Flags override `-d` fields.
 
 ## Configuration
 
-See `references/settings.md` for full configuration reference.
+When you need to manage site authentication (cookies, headers), cache TTL, or viewport defaults, read references/settings.md.
+
+Common pattern: user provides cookies/auth for a site → store as site headers → all subsequent requests are authenticated:
+```bash
+ctx site set example.com Cookie "sid=abc; token=xyz"
+```
+
+## Self-Improvement
+
+When you encounter friction — a command that doesn't work as expected, a misleading instruction in this skill, or confusing parameter design — read references/feedback.md and file a GitHub issue.

@@ -60,19 +60,21 @@ func (c *LinksCmd) Run(_ *api.Client) error {
 		return err
 	}
 
+	url := effectiveURL(c.URL, body)
+
 	links, err := client.Links(context.Background(), c.URL, body)
 	if err != nil {
-		return fmt.Errorf("links extraction from %s failed: %w", c.URL, err)
+		return fmt.Errorf("links extraction from %s failed: %w", url, err)
 	}
 
 	if len(links) == 0 {
-		fmt.Printf("No links found on %s. The page may require JavaScript or have no anchor elements.\n", c.URL)
+		fmt.Printf("No links found on %s. The page may require JavaScript or have no anchor elements.\n", url)
 		return nil
 	}
 
 	output := strings.Join(links, "\n") + "\n"
 	_ = cache.Store(cacheKey, []byte(output), ".txt", cache.Meta{
-		URL:    c.URL,
+		URL:    url,
 		Source: "cloudflare",
 	})
 

@@ -132,16 +132,16 @@ func (c *CrawlCmd) pollAndPrint(ctx context.Context, client *cfrender.Client, jo
 
 		if terminal && cursor == "" {
 			if len(printed) == 0 {
-				fmt.Printf("Crawl completed but found no pages. Check the URL and try: ctx crawl %s --limit %d --depth 1\n", c.Target, c.Limit)
+				fmt.Fprintf(os.Stderr, "Crawl completed but found no pages. Check the URL and try: ctx crawl %s --limit %d --depth 1\n", c.Target, c.Limit)
 			} else if status.Status != "completed" {
-				fmt.Printf("\n---\nCrawl ended: %s. ", status.Status)
+				fmt.Fprintf(os.Stderr, "\n---\nCrawl ended: %s. ", status.Status)
 				switch status.Status {
 				case "cancelled_due_to_timeout":
-					fmt.Printf("Try smaller --limit or --depth.\n")
+					fmt.Fprintf(os.Stderr, "Try smaller --limit or --depth.\n")
 				case "cancelled_due_to_limits":
-					fmt.Printf("Increase --limit to crawl more pages.\n")
+					fmt.Fprintf(os.Stderr, "Increase --limit to crawl more pages.\n")
 				default:
-					fmt.Printf("Use `ctx crawl %s` to retry.\n", c.Target)
+					fmt.Fprintf(os.Stderr, "Use `ctx crawl %s` to retry.\n", c.Target)
 				}
 			}
 			return nil

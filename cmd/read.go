@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,21 +29,18 @@ type ReadCmd struct {
 	Section string `short:"s" help:"Section(s) to extract (e.g. 1, 1-3, 1.2,3.1-5.1,6.2)"`
 }
 
-const (
-	truncateThreshold = 2000
-	truncateOutput    = 1000
-)
+const summaryThreshold = 2000
 
 func (c *ReadCmd) Run(_ *api.Client) error {
 	url := c.URL
 
-	// Local file — direct read, no cache
+	// Local file — direct read, no cache, no hints, no summary
 	if path, ok := localPath(url); ok {
 		data, err := os.ReadFile(path)
 		if err != nil {
-			return err
+			return fmt.Errorf("file not found: %s", path)
 		}
-		return c.output(path, string(data))
+		return c.output(path, string(data), false)
 	}
 
 	cacheKey := cache.Key("markdown", canonicalizeURL(url))
@@ -50,7 +48,7 @@ func (c *ReadCmd) Run(_ *api.Client) error {
 	// Try cache
 	if !c.NoCache {
 		if data, _, ok := cache.Lookup(cacheKey, ".md"); ok {
-			return c.output(cache.Path(cacheKey, ".md"), string(data))
+			return c.output(cache.Path(cacheKey, ".md"), string(data), true)
 		}
 	}
 
@@ -60,20 +58,40 @@ func (c *ReadCmd) Run(_ *api.Client) error {
 		return err
 	}
 
-	incomplete := looksIncomplete(content)
-
-	// Store clean content before appending any hints
+	// Store clean content (no hints ever appended to stored content)
 	_ = cache.Store(cacheKey, []byte(content), ".md", cache.Meta{
 		URL:    canonicalizeURL(url),
 		Source: source,
 	})
 
-	if incomplete {
-		content += fmt.Sprintf(
-			"\n---\nContent may be incomplete (JS-rendered page). Use `ctx read -f %s` for full rendering.\n", url)
+	// Hints go to stderr only, per contract Section 4
+	// looksIncomplete only applies to source=http (not github, not cloudflare)
+	if source == "http" && looksIncomplete(content) {
+		fmt.Fprintf(os.Stderr, "Content may be incomplete (JS-rendered page). Re-run with: ctx read -f %s\n", url)
 	}
 
-	return c.output(cache.Path(cacheKey, ".md"), content)
+	// Empty content hints (stderr), per source
+	if strings.TrimSpace(content) == "" {
+		switch source {
+		case "http":
+			fmt.Fprintf(os.Stderr, "No content returned for %s. Possible causes: authentication required, anti-bot protection, or empty page. Try: ctx read -f %s\n", url, url)
+		case "cloudflare":
+			fmt.Fprintf(os.Stderr, "No content returned for %s. Possible causes: authentication required (ctx site set %s ...), anti-bot protection, or the page is genuinely empty.\n", url, extractDomainFromURL(url))
+		}
+	}
+
+	return c.output(cache.Path(cacheKey, ".md"), content, true)
+}
+
+func extractDomainFromURL(rawURL string) string {
+	if i := strings.Index(rawURL, "://"); i >= 0 {
+		rest := rawURL[i+3:]
+		if j := strings.IndexAny(rest, ":/"); j >= 0 {
+			return rest[:j]
+		}
+		return rest
+	}
+	return rawURL
 }
 
 // fetch dispatches to the right fetcher and returns (content, source, error).
@@ -89,6 +107,18 @@ func (c *ReadCmd) fetch(url string) (string, string, error) {
 	if strings.Contains(url, "github.com") {
 		if path, ref, ok := parseGitHubBlobURL(url); ok {
 			content, err := fetchGitHub(path, ref)
+			if err != nil && strings.Contains(err.Error(), "GitHub API 404") {
+				// The 404 might be a real not-found, or it might be a slash-ref
+				// misparsing (e.g. "feature/auth" parsed as ref="feature").
+				// Return the real error; add a stderr note about possible ambiguity.
+				parts := strings.SplitN(path, "/", 3)
+				if len(parts) >= 3 {
+					fmt.Fprintf(os.Stderr,
+						"Note: if the branch name contains '/', ref %q may have been parsed incorrectly.\n"+
+							"Try: ctx read github://%s/%s@<ref>/%s\n",
+						ref, parts[0], parts[1], parts[2])
+				}
+			}
 			return content, "github", err
 		}
 	}
@@ -114,9 +144,10 @@ func (c *ReadCmd) fetch(url string) (string, string, error) {
 	return content, "cloudflare", err
 }
 
-// output handles --toc, -s, and default (with truncation).
-// contentPath is the file path shown in truncation hints (cache path or local file path).
-func (c *ReadCmd) output(contentPath, content string) error {
+// output handles --toc, -s, and default (with structural summary for long docs).
+// contentPath is the cache file path (or local file path).
+// allowSummary controls whether long documents get a structural summary (false for local files).
+func (c *ReadCmd) output(contentPath, content string, allowSummary bool) error {
 	source := []byte(content)
 
 	if c.TOC {
@@ -136,7 +167,7 @@ func (c *ReadCmd) output(contentPath, content string) error {
 			return err
 		}
 		if len(matched) == 0 {
-			return fmt.Errorf("no sections matched %q — use `ctx read %s --toc` to see available sections", c.Section, c.URL)
+			return fmt.Errorf("no sections matched %q — use: ctx read %s --toc", c.Section, c.URL)
 		}
 		for i, h := range matched {
 			if i > 0 {
@@ -147,17 +178,20 @@ func (c *ReadCmd) output(contentPath, content string) error {
 		return nil
 	}
 
-	// Default output with truncation
-	lines := strings.Split(content, "\n")
-	if len(lines) > truncateThreshold {
-		fmt.Println(strings.Join(lines[:truncateOutput], "\n"))
-		fmt.Printf("\n---\nDocument truncated (%d lines). Full content: %s\n"+
-			"Use --toc to see outline, or -s <number> to read a section.\n",
-			len(lines), contentPath)
+	// Default mode: full content for short docs or local files; structural summary for long remote docs
+	lines := strings.Count(content, "\n") + 1
+	if !allowSummary || lines <= summaryThreshold {
+		fmt.Print(content)
 		return nil
 	}
 
-	fmt.Print(content)
+	// Long remote document → structural summary
+	headings := markdown.ParseHeadings(source)
+	if len(headings) > 0 {
+		fmt.Print(markdown.FormatSummary(source, headings, c.URL, contentPath))
+	} else {
+		fmt.Print(markdown.FormatLineSummary(source, contentPath))
+	}
 	return nil
 }
 
@@ -187,6 +221,7 @@ func formatGitHubScheme(path, ref string) string {
 
 // parseGitHubScheme extracts the plain owner/repo/path and optional ref from
 // a github:// URI body like "owner/repo@ref/path" or "owner/repo/path".
+// Supports URL-encoded refs: owner/repo@feature%2Fauth/path → ref="feature/auth"
 func parseGitHubScheme(raw string) (path, ref string) {
 	// Split into at most 3 parts: owner, repoMaybeRef, filePath
 	parts := strings.SplitN(raw, "/", 3)
@@ -196,6 +231,10 @@ func parseGitHubScheme(raw string) (path, ref string) {
 	repo := parts[1]
 	if at := strings.IndexByte(repo, '@'); at >= 0 {
 		ref = repo[at+1:]
+		// URL-decode ref to support %2F for slash-containing branch names
+		if decoded, err := url.PathUnescape(ref); err == nil {
+			ref = decoded
+		}
 		parts[1] = repo[:at]
 	}
 	return strings.Join(parts, "/"), ref
@@ -231,6 +270,9 @@ func fetchGitHub(path, ref string) (string, error) {
 
 	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode == 403 && strings.Contains(string(body), "rate limit") {
+			return "", fmt.Errorf("GitHub API rate limited. Set GITHUB_TOKEN or run: gh auth login")
+		}
 		return "", fmt.Errorf("GitHub API %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -262,7 +304,8 @@ func fetchHTTP(url string) (string, error) {
 	}
 
 	req.Header.Set("Accept",
-		"text/markdown;q=1.0, text/x-markdown;q=0.9, text/plain;q=0.8, text/html;q=0.7, */*;q=0.1")
+		"text/markdown;q=1.0, text/x-markdown;q=0.9, text/plain;q=0.8, "+
+			"application/json;q=0.7, application/xml;q=0.6, text/html;q=0.5")
 	req.Header.Set("User-Agent",
 		"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko)")
 
@@ -282,11 +325,12 @@ func fetchHTTP(url string) (string, error) {
 		return "", err
 	}
 
-	if isMarkdownContentType(ct) || isPlainText(ct) {
+	// Accept text-like content directly (no CF fallback needed)
+	if isDirectlyReadable(ct) {
 		return string(body), nil
 	}
 
-	// HTML response — signal caller to use CF fallback
+	// HTML / unknown → signal caller to use CF fallback
 	return "", nil
 }
 
@@ -342,12 +386,26 @@ func looksIncomplete(content string) bool {
 	return false
 }
 
-func isMarkdownContentType(ct string) bool {
-	return strings.Contains(ct, "text/markdown") || strings.Contains(ct, "text/x-markdown")
-}
-
-func isPlainText(ct string) bool {
-	return strings.Contains(ct, "text/plain")
+// isDirectlyReadable returns true for content types that can be used as-is
+// without browser rendering: markdown, plain text, JSON, XML, YAML, etc.
+func isDirectlyReadable(ct string) bool {
+	ct = strings.ToLower(ct)
+	for _, prefix := range []string{
+		"text/markdown", "text/x-markdown",
+		"text/plain",
+		"application/json", "text/json",
+		"application/xml", "text/xml",
+		"application/yaml", "text/yaml", "application/x-yaml",
+	} {
+		if strings.Contains(ct, prefix) {
+			return true
+		}
+	}
+	// Accept any text/* subtype except text/html
+	if strings.HasPrefix(ct, "text/") && !strings.Contains(ct, "text/html") {
+		return true
+	}
+	return false
 }
 
 func parseGitHubBlobURL(rawURL string) (path string, ref string, ok bool) {

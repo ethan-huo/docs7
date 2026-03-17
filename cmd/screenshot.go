@@ -65,13 +65,15 @@ func (c *ScreenshotCmd) Run(_ *api.Client) error {
 		return err
 	}
 
+	url := effectiveURL(c.URL, body)
+
 	data, err := client.Screenshot(context.Background(), c.URL, body)
 	if err != nil {
-		return fmt.Errorf("screenshot of %s failed: %w", c.URL, err)
+		return fmt.Errorf("screenshot of %s failed: %w", url, err)
 	}
 
 	_ = cache.Store(cacheKey, data, ".png", cache.Meta{
-		URL:         c.URL,
+		URL:         url,
 		Source:      "cloudflare",
 		ContentType: "image/png",
 	})

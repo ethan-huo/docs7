@@ -263,6 +263,78 @@ func TestNormalizeURL(t *testing.T) {
 	}
 }
 
+// ===== parseGitHubScheme with %2F (URL-encoded slash ref) =====
+
+func TestParseGitHubScheme_URLEncodedRef(t *testing.T) {
+	path, ref := parseGitHubScheme("owner/repo@feature%2Fauth/src/main.go")
+	if ref != "feature/auth" {
+		t.Errorf("ref = %q, want %q", ref, "feature/auth")
+	}
+	if path != "owner/repo/src/main.go" {
+		t.Errorf("path = %q, want %q", path, "owner/repo/src/main.go")
+	}
+}
+
+func TestParseGitHubScheme_PlainRef(t *testing.T) {
+	path, ref := parseGitHubScheme("owner/repo@v2.0/src/main.go")
+	if ref != "v2.0" {
+		t.Errorf("ref = %q, want %q", ref, "v2.0")
+	}
+	if path != "owner/repo/src/main.go" {
+		t.Errorf("path = %q, want %q", path, "owner/repo/src/main.go")
+	}
+}
+
+// ===== isDirectlyReadable =====
+
+func TestIsDirectlyReadable(t *testing.T) {
+	tests := []struct {
+		ct   string
+		want bool
+	}{
+		{"text/markdown", true},
+		{"text/markdown; charset=utf-8", true},
+		{"text/plain", true},
+		{"application/json", true},
+		{"application/json; charset=utf-8", true},
+		{"application/xml", true},
+		{"text/xml", true},
+		{"application/yaml", true},
+		{"text/csv", true},           // generic text/* accepted
+		{"text/html", false},         // needs browser rendering
+		{"text/html; charset=utf-8", false},
+		{"application/octet-stream", false},
+		{"image/png", false},
+	}
+
+	for _, tt := range tests {
+		got := isDirectlyReadable(tt.ct)
+		if got != tt.want {
+			t.Errorf("isDirectlyReadable(%q) = %v, want %v", tt.ct, got, tt.want)
+		}
+	}
+}
+
+// ===== extractDomainFromURL =====
+
+func TestExtractDomainFromURL(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"https://example.com/page", "example.com"},
+		{"https://sub.example.com:8080/page", "sub.example.com"},
+		{"http://localhost:3000", "localhost"},
+	}
+
+	for _, tt := range tests {
+		got := extractDomainFromURL(tt.input)
+		if got != tt.want {
+			t.Errorf("extractDomainFromURL(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
 // ===== isRealURL =====
 
 func TestIsRealURL(t *testing.T) {

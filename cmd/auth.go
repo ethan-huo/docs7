@@ -115,7 +115,11 @@ func (c *AuthStatusCmd) Run(client *api.Client) error {
 	if token != "" {
 		tokens, err := api.LoadTokens()
 		if err == nil {
-			fmt.Printf("Context7:   authenticated (%s...%s", tokens.AccessToken[:8], tokens.AccessToken[len(tokens.AccessToken)-4:])
+			masked := tokens.AccessToken
+			if len(masked) > 12 {
+				masked = masked[:8] + "..." + masked[len(masked)-4:]
+			}
+			fmt.Printf("Context7:   authenticated (%s", masked)
 			if tokens.ExpiresAt > 0 {
 				remaining := (tokens.ExpiresAt - time.Now().UnixMilli()) / 1000
 				if remaining > 3600 {
@@ -132,7 +136,11 @@ func (c *AuthStatusCmd) Run(client *api.Client) error {
 
 	creds, err := api.LoadCFCredentials()
 	if err == nil {
-		fmt.Printf("Cloudflare: configured (account: %s...)\n", creds.AccountID[:8])
+		aid := creds.AccountID
+		if len(aid) > 8 {
+			aid = aid[:8] + "..."
+		}
+		fmt.Printf("Cloudflare: configured (account: %s)\n", aid)
 	} else {
 		fmt.Println("Cloudflare: not configured")
 	}

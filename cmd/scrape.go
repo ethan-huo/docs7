@@ -53,9 +53,11 @@ func (c *ScrapeCmd) Run(_ *api.Client) error {
 		return err
 	}
 
+	url := effectiveURL(c.URL, body)
+
 	results, err := client.Scrape(context.Background(), c.URL, c.Selector, body)
 	if err != nil {
-		return fmt.Errorf("scrape of %s with selectors %v failed: %w", c.URL, c.Selector, err)
+		return fmt.Errorf("scrape of %s with selectors %v failed: %w", url, c.Selector, err)
 	}
 
 	allEmpty := true
@@ -66,8 +68,8 @@ func (c *ScrapeCmd) Run(_ *api.Client) error {
 		}
 	}
 	if allEmpty {
-		fmt.Printf("No elements matched selectors %v on %s.\n", c.Selector, c.URL)
-		fmt.Printf("Hint: use `ctx read %s` to inspect page content, or `ctx screenshot %s` to see the rendered page.\n", c.URL, c.URL)
+		fmt.Printf("No elements matched selectors %v on %s.\n", c.Selector, url)
+		fmt.Printf("Hint: use `ctx read %s` to inspect page content, or `ctx screenshot %s` to see the rendered page.\n", url, url)
 		return nil
 	}
 
