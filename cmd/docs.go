@@ -51,7 +51,7 @@ func (c *DocsCmd) Run(client *api.Client) error {
 	}
 
 	// Hints
-	fmt.Println("\n---\n")
+	fmt.Println("\n---")
 	fmt.Println("Use `ctx read <url>` to fetch full documents:")
 	for _, src := range sources {
 		fmt.Printf("- %s\n", src.url)
@@ -119,33 +119,14 @@ func isRealURL(u string) bool {
 	return true
 }
 
-// normalizeURL converts GitHub blob URLs to github:// scheme,
+// normalizeURL converts GitHub blob URLs to github:// scheme (preserving ref),
 // keeps everything else as-is.
 func normalizeURL(rawURL string) string {
 	if !strings.Contains(rawURL, "github.com") {
 		return rawURL
 	}
-
-	trimmed := strings.TrimPrefix(rawURL, "https://github.com/")
-	trimmed = strings.TrimPrefix(trimmed, "http://github.com/")
-	parts := strings.SplitN(trimmed, "/blob/", 2)
-	if len(parts) != 2 {
-		return rawURL
+	if path, ref, ok := parseGitHubBlobURL(rawURL); ok {
+		return formatGitHubScheme(path, ref)
 	}
-	repo := parts[0]
-	rest := parts[1]
-	// Strip branch prefix
-	if idx := strings.IndexByte(rest, '/'); idx >= 0 {
-		rest = rest[idx+1:]
-	} else {
-		return rawURL
-	}
-	// Strip query/fragment
-	if idx := strings.IndexByte(rest, '?'); idx >= 0 {
-		rest = rest[:idx]
-	}
-	if idx := strings.IndexByte(rest, '#'); idx >= 0 {
-		rest = rest[:idx]
-	}
-	return "github://" + repo + "/" + rest
+	return rawURL
 }

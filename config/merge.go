@@ -18,14 +18,32 @@ import (
 func BuildRequestBody(endpoint string, targetURL string, dataBody []byte, flagOverrides map[string]any) ([]byte, error) {
 	merged := make(map[string]any)
 
+	// Resolve effective URL for site header lookup.
+	// Commands like links/screenshot/json/scrape pass the URL only via -d body,
+	// leaving targetURL empty and silently skipping per-domain headers.
+	effectiveURL := targetURL
+	if effectiveURL == "" {
+		if u, ok := flagOverrides["url"].(string); ok {
+			effectiveURL = u
+		}
+	}
+	if effectiveURL == "" && dataBody != nil {
+		var peek map[string]any
+		if err := json.Unmarshal(dataBody, &peek); err == nil {
+			if u, ok := peek["url"].(string); ok {
+				effectiveURL = u
+			}
+		}
+	}
+
 	// Layer 1: settings defaults
 	if settings, err := LoadSettings(); err == nil && settings.Defaults != nil {
 		deepMerge(merged, settings.Defaults)
 	}
 
 	// Layer 2: site headers for matching domain
-	if targetURL != "" {
-		if domain := extractDomain(targetURL); domain != "" {
+	if effectiveURL != "" {
+		if domain := extractDomain(effectiveURL); domain != "" {
 			if headers := SiteHeaders(domain); len(headers) > 0 {
 				existing, _ := merged["setExtraHTTPHeaders"].(map[string]any)
 				if existing == nil {

@@ -13,7 +13,7 @@ import (
 type ScrapeCmd struct {
 	cfrender.DataFlag
 	URL      string   `arg:"" help:"URL to scrape" optional:""`
-	Selector []string `short:"s" help:"CSS selectors (repeatable)" required:""`
+	Selector []string `short:"s" help:"CSS selectors (repeatable)"`
 	TextOnly bool     `help:"Output text content only" default:"false"`
 }
 
@@ -38,6 +38,10 @@ func (c *ScrapeCmd) Run(_ *api.Client) error {
 	body, err := config.BuildRequestBody("scrape", c.URL, dataBody, overrides)
 	if err != nil {
 		return err
+	}
+
+	if len(c.Selector) == 0 && dataBody == nil {
+		return fmt.Errorf("selectors are required (via -s flag or in -d body as elements array)")
 	}
 
 	if c.URL == "" && dataBody == nil {

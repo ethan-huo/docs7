@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/ethan-huo/ctx/api"
@@ -76,6 +77,6 @@ func (c *LinksCmd) Run(_ *api.Client) error {
 	})
 
 	fmt.Print(output)
-	fmt.Printf("\n---\n%d links found. Use `ctx read <url>` to read any of them.\n", len(links))
+	fmt.Fprintf(os.Stderr, "%d links found\n", len(links))
 	return nil
 }

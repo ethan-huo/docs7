@@ -78,16 +78,17 @@ func (c *ReadCmd) Run(_ *api.Client) error {
 
 // fetch dispatches to the right fetcher and returns (content, source, error).
 func (c *ReadCmd) fetch(url string) (string, string, error) {
-	// github://owner/repo/path
+	// github://owner/repo@ref/path or github://owner/repo/path
 	if strings.HasPrefix(url, "github://") {
-		content, err := fetchGitHub(strings.TrimPrefix(url, "github://"))
+		path, ref := parseGitHubScheme(strings.TrimPrefix(url, "github://"))
+		content, err := fetchGitHub(path, ref)
 		return content, "github", err
 	}
 
 	// https://github.com/owner/repo/blob/branch/path
 	if strings.Contains(url, "github.com") {
-		if path, ok := parseGitHubBlobURL(url); ok {
-			content, err := fetchGitHub(path)
+		if path, ref, ok := parseGitHubBlobURL(url); ok {
+			content, err := fetchGitHub(path, ref)
 			return content, "github", err
 		}
 	}
@@ -161,23 +162,56 @@ func (c *ReadCmd) output(contentPath, content string) error {
 }
 
 // canonicalizeURL normalizes GitHub blob URLs to github:// form for cache key consistency.
+// When a ref is present, the format is github://owner/repo@ref/path.
 func canonicalizeURL(url string) string {
 	if strings.Contains(url, "github.com") {
-		if path, ok := parseGitHubBlobURL(url); ok {
-			return "github://" + path
+		if path, ref, ok := parseGitHubBlobURL(url); ok {
+			return formatGitHubScheme(path, ref)
 		}
 	}
 	return url
 }
 
+// formatGitHubScheme builds a github:// URI, embedding @ref in the owner/repo segment when non-empty.
+func formatGitHubScheme(path, ref string) string {
+	if ref == "" {
+		return "github://" + path
+	}
+	// path is "owner/repo/file/path" — inject @ref after repo
+	parts := strings.SplitN(path, "/", 3)
+	if len(parts) < 3 {
+		return "github://" + path
+	}
+	return fmt.Sprintf("github://%s/%s@%s/%s", parts[0], parts[1], ref, parts[2])
+}
+
+// parseGitHubScheme extracts the plain owner/repo/path and optional ref from
+// a github:// URI body like "owner/repo@ref/path" or "owner/repo/path".
+func parseGitHubScheme(raw string) (path, ref string) {
+	// Split into at most 3 parts: owner, repoMaybeRef, filePath
+	parts := strings.SplitN(raw, "/", 3)
+	if len(parts) < 2 {
+		return raw, ""
+	}
+	repo := parts[1]
+	if at := strings.IndexByte(repo, '@'); at >= 0 {
+		ref = repo[at+1:]
+		parts[1] = repo[:at]
+	}
+	return strings.Join(parts, "/"), ref
+}
+
 // --- Fetch functions (pure: return content, no stdout side effects) ---
 
-func fetchGitHub(path string) (string, error) {
+func fetchGitHub(path, ref string) (string, error) {
 	parts := strings.SplitN(path, "/", 3)
 	if len(parts) < 3 {
 		return "", fmt.Errorf("invalid github path: %s (expected owner/repo/path)", path)
 	}
 	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/contents/%s", parts[0], parts[1], parts[2])
+	if ref != "" {
+		apiURL += "?ref=" + ref
+	}
 
 	req, err := http.NewRequest("GET", apiURL, nil)
 	if err != nil {
@@ -316,27 +350,28 @@ func isPlainText(ct string) bool {
 	return strings.Contains(ct, "text/plain")
 }
 
-func parseGitHubBlobURL(rawURL string) (string, bool) {
+func parseGitHubBlobURL(rawURL string) (path string, ref string, ok bool) {
 	trimmed := strings.TrimPrefix(rawURL, "https://github.com/")
 	trimmed = strings.TrimPrefix(trimmed, "http://github.com/")
 	parts := strings.SplitN(trimmed, "/blob/", 2)
 	if len(parts) != 2 {
-		return "", false
+		return "", "", false
 	}
 	repo := parts[0]
 	rest := parts[1]
-	if idx := strings.IndexByte(rest, '/'); idx >= 0 {
-		rest = rest[idx+1:]
-	} else {
-		return "", false
+	idx := strings.IndexByte(rest, '/')
+	if idx < 0 {
+		return "", "", false
 	}
+	ref = rest[:idx]
+	rest = rest[idx+1:]
 	if idx := strings.IndexByte(rest, '?'); idx >= 0 {
 		rest = rest[:idx]
 	}
 	if idx := strings.IndexByte(rest, '#'); idx >= 0 {
 		rest = rest[:idx]
 	}
-	return repo + "/" + rest, true
+	return repo + "/" + rest, ref, true
 }
 
 func ghToken() string {

@@ -12,7 +12,6 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/ethan-huo/ctx/config"
@@ -136,26 +135,31 @@ func refreshToken(baseURL, refresh string) (*TokenData, error) {
 func Login(baseURL string, noBrowser bool) error {
 	verifier, challenge := generatePKCE()
 	state := generateState()
-
 	authURL := buildAuthURL(baseURL, challenge, state)
 
-	var wg sync.WaitGroup
+	done := make(chan struct{}, 1)
 	var callbackCode string
 	var callbackErr error
 
-	wg.Add(1)
-	srv := &http.Server{Addr: fmt.Sprintf("127.0.0.1:%d", callbackPort)}
-	http.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
-		defer wg.Done()
+	mux := http.NewServeMux()
+	srv := &http.Server{
+		Addr:    fmt.Sprintf("127.0.0.1:%d", callbackPort),
+		Handler: mux,
+	}
 
+	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
 		if errParam := r.URL.Query().Get("error"); errParam != "" {
 			desc := r.URL.Query().Get("error_description")
 			if desc == "" {
 				desc = errParam
 			}
 			w.Header().Set("Content-Type", "text/html")
-			fmt.Fprintf(w, htmlPage("Login Failed", desc, "#dc2626"))
+			fmt.Fprint(w, htmlPage("Login Failed", desc, "#dc2626"))
 			callbackErr = fmt.Errorf("%s", desc)
+			select {
+			case done <- struct{}{}:
+			default:
+			}
 			go srv.Close()
 			return
 		}
@@ -164,32 +168,56 @@ func Login(baseURL string, noBrowser bool) error {
 		rState := r.URL.Query().Get("state")
 		if code == "" || rState == "" {
 			w.Header().Set("Content-Type", "text/html")
-			fmt.Fprintf(w, htmlPage("Login Failed", "Missing code or state", "#dc2626"))
+			fmt.Fprint(w, htmlPage("Login Failed", "Missing code or state", "#dc2626"))
 			callbackErr = fmt.Errorf("missing code or state")
+			select {
+			case done <- struct{}{}:
+			default:
+			}
 			go srv.Close()
 			return
 		}
 		if rState != state {
 			w.Header().Set("Content-Type", "text/html")
-			fmt.Fprintf(w, htmlPage("Login Failed", "State mismatch", "#dc2626"))
+			fmt.Fprint(w, htmlPage("Login Failed", "State mismatch", "#dc2626"))
 			callbackErr = fmt.Errorf("state mismatch")
+			select {
+			case done <- struct{}{}:
+			default:
+			}
 			go srv.Close()
 			return
 		}
 
 		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprintf(w, htmlPage("Login Successful!", "You can close this window and return to the terminal.", "#16a34a"))
+		fmt.Fprint(w, htmlPage("Login Successful!", "You can close this window and return to the terminal.", "#16a34a"))
 		callbackCode = code
+		select {
+		case done <- struct{}{}:
+		default:
+		}
 		go srv.Close()
 	})
 
 	go func() {
-		// 5 minute timeout
 		time.Sleep(5 * time.Minute)
+		callbackErr = fmt.Errorf("login timed out after 5 minutes — no browser callback received")
+		select {
+		case done <- struct{}{}:
+		default:
+		}
 		srv.Close()
 	}()
 
-	go srv.ListenAndServe()
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			callbackErr = fmt.Errorf("failed to start callback server on port %d: %w", callbackPort, err)
+			select {
+			case done <- struct{}{}:
+			default:
+			}
+		}
+	}()
 
 	if noBrowser {
 		fmt.Printf("Open this URL in your browser:\n%s\n", authURL)
@@ -199,7 +227,7 @@ func Login(baseURL string, noBrowser bool) error {
 	}
 
 	fmt.Println("Waiting for authorization...")
-	wg.Wait()
+	<-done
 
 	if callbackErr != nil {
 		return callbackErr
