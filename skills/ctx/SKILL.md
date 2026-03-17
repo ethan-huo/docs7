@@ -48,7 +48,15 @@ Auto-detects URL type and fetches accordingly:
 - `https://...` (markdown/text/JSON/XML/YAML) → direct fetch
 - `https://...` (HTML/SPA) → full JS rendering fallback; use `-f` to skip the HTTP attempt
 
-When rendering via Cloudflare, a content-density heuristic automatically strips navigation, sidebar, header, and footer noise — extracting only the main content block.
+When rendering via Cloudflare, a content-density heuristic automatically strips navigation, sidebar, header, and footer noise. This works for most sites without any configuration.
+
+If the default cleanup selects the wrong content block on a specific site, use `-d` with `addScriptTag` to **replace** it with your own extraction logic:
+
+```bash
+ctx read -d '{url: "https://example.com", addScriptTag: [{content: "document.body.innerHTML = document.querySelector(\".doc-body\").outerHTML"}]}'
+```
+
+Other useful `-d` parameters: `cookies`, `waitForSelector`, `gotoOptions.waitUntil`, `viewport`.
 
 **stdout/stderr contract**: stdout is always clean document content. Diagnostic hints (incomplete content, empty page warnings) go to stderr only.
 
