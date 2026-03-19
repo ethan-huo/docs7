@@ -1,15 +1,21 @@
 # ctx
 
-Library documentation finder — uses [Context7](https://context7.com) index to locate documentation sources, then reads full documents instead of RAG chunks.
+Full-document search and reading for AI agents. Find any library's docs, read the complete source — not RAG fragments.
 
-## Why
+```bash
+ctx docs react "useEffect cleanup"     # find doc sources via Context7 index
+ctx read <url>                          # read full document as clean markdown
+ctx crawl <docs-site> --limit 20       # pull an entire docs section at once
+```
 
-Tools like ctx7 and ref both solve "find docs for AI agents" but with trade-offs:
+## The Problem
 
-- **ctx7** has great search but returns fragmented RAG chunks (60-200 tokens each)
-- **ref** returns full documents but search accuracy is inconsistent
+AI coding agents need documentation, but current tools make trade-offs:
 
-ctx takes ctx7's search index and discards the chunks, keeping only the source URLs. Then it reads the full original documents via GitHub API or HTTP with markdown content negotiation.
+- **RAG-based tools** (ctx7, etc.) return 60-200 token fragments — too small for real understanding
+- **Full-doc tools** (ref, etc.) return complete pages but search accuracy is inconsistent
+
+**ctx** combines the best of both: ctx7's search index to *find* the right documents, then fetches the full originals via GitHub API, HTTP content negotiation, or headless browser rendering.
 
 ## Install
 
@@ -17,7 +23,8 @@ ctx takes ctx7's search index and discards the chunks, keeping only the source U
 go install github.com/ethan-huo/ctx@latest
 ```
 
-Or build from source:
+<details>
+<summary>Build from source</summary>
 
 ```bash
 make build    # compile to bin/ctx
@@ -25,123 +32,88 @@ make install  # build + symlink to ~/.local/bin/ctx
 ```
 
 Requires Go 1.25+.
+</details>
 
-## Usage
+## Workflow
 
-```bash
-# Find a library by name
-ctx search react-native
-
-# Find documentation sources for a library
-ctx docs mlx-swift "GPU stream thread safety"
-ctx docs sparkle "appcast auto update"
-
-# Read a full document
-ctx read github://ml-explore/mlx-swift/Source/MLX/Documentation.docc/MLXArray.md
-ctx read https://sparkle-project.org/documentation/index
-
-# Table of contents and section extraction
-ctx read --toc https://example.com/docs
-ctx read -s 1.2 https://example.com/docs
-
-# Browser rendering commands
-ctx screenshot https://example.com --full-page
-ctx links https://example.com --internal-only
-ctx scrape https://example.com -s ".article" --text-only
-ctx json https://example.com --prompt "Extract all product names and prices"
-ctx crawl https://docs.example.com --limit 50 --depth 2
-
-# Per-domain header management
-ctx site set example.com Cookie "session=abc"
-ctx site ls
-```
-
-## Authentication
-
-ctx shares credentials with ctx7 (`~/.config/ctx/credentials.yaml`).
+### 1. Search → Read
 
 ```bash
-# Login to Context7 (opens browser, OAuth PKCE)
-ctx auth login ctx7
-
-# Configure Cloudflare Browser Rendering
-ctx auth login cloudflare
-
-# Check status
-ctx auth status
-
-# Logout (clears all credentials)
-ctx auth logout
+ctx docs mlx-swift "GPU stream thread safety"   # find relevant doc URLs
+ctx read <url>                                    # read as clean markdown
 ```
 
-GitHub reads use your `gh auth` token automatically.
+Long documents (>2000 lines) automatically produce a structural summary with numbered sections:
 
-## How `read` works
+```bash
+ctx read <url>             # returns summary with section numbers
+ctx read <url> -s 2.1      # read specific section
+ctx read <url> -s "1-3,5"  # combine sections
+ctx read <url> --toc       # compact heading outline
+```
 
-| URL | Strategy |
+### 2. Browser Superpowers
+
+When plain HTTP isn't enough, ctx uses [Cloudflare Browser Rendering](https://developers.cloudflare.com/browser-rendering/) for full JS-rendered pages:
+
+| Need | Command |
 |---|---|
-| Local path / `file://` | Direct file read |
-| `github://owner/repo[@ref]/path` | GitHub Contents API |
-| `https://github.com/.../blob/...` | Auto-converted to GitHub API |
-| Any `https://` | `Accept: text/markdown` negotiation → Cloudflare Browser Rendering fallback |
+| Read a JS-rendered SPA | `ctx read -f <url>` |
+| Extract specific DOM elements | `ctx scrape <url> -s "table.api-params"` |
+| Pull multiple pages from a docs site | `ctx crawl <url> --limit 50 --depth 2` |
+| Screenshot a page | `ctx screenshot <url> --full-page` |
+| Explore a site's link structure | `ctx links <url> --internal-only` |
+| Extract structured data with AI | `ctx json <url> --prompt "Extract pricing tiers"` |
 
-Flags:
-
-| Flag | Short | Description |
-|------|-------|-------------|
-| `--full` | `-f` | Force Cloudflare Browser Rendering (skip HTTP negotiation) |
-| `--toc` | | Show heading outline with section numbers and line counts |
-| `--section` | `-s` | Extract section(s) by number (e.g., `1`, `1-3`, `1.2,3.1-5.1`) |
-| `--no-cache` | | Bypass cache lookup (still stores result) |
-| `--data` | `-d` | Cloudflare API request body (JSON5, `@file`, or `-` for stdin). Implies `-f`. |
-
-For documents over 2000 lines, `read` automatically produces a structural summary with numbered headings and line counts. Use `-s <number>` to read specific sections.
-
-## Browser Rendering Commands
-
-All commands below use [Cloudflare Browser Rendering](https://developers.cloudflare.com/browser-rendering/) and support `-d` for passing full API request bodies as JSON5.
-
-```bash
-ctx screenshot <url> [--full-page] [--selector <css>] [-o file]
-ctx links <url> [--internal-only] [--visible-only]
-ctx scrape <url> -s <selector> [--text-only]
-ctx json <url> --prompt <text> [--schema @file]
-ctx crawl <url> [--limit N] [--depth N] [--include/--exclude patterns]
-```
-
-Use `-d @file.json5` or `-d -` (stdin/heredoc) to pass cookies, auth, viewport, and other CF API parameters.
-
-Common `-d` parameters:
+All commands support `-d` for full API control (cookies, viewport, JS injection, etc.):
 
 ```jsonc
 {
   url: "https://example.com",
   cookies: "session=abc",
   viewport: {width: 1920, height: 1080},
-  waitForSelector: ".content-loaded",
   addScriptTag: [{content: "document.querySelector('.nav')?.remove()"}]
 }
 ```
 
-## Per-Domain Headers (`site`)
+### 3. Per-Domain Auth
 
-Manage custom headers that are auto-injected into all Cloudflare requests for matching domains.
+Store headers that auto-inject into all requests for a domain:
 
 ```bash
-ctx site ls [domain]                    # list domains or headers
-ctx site set <domain> <key> <value>     # set a single header
-ctx site set <domain> @headers.json5    # bulk import from file
-ctx site del <domain> [key]             # delete domain or header
+ctx site set example.com Cookie "session=abc"
+ctx site set example.com Authorization "Bearer token123"
+ctx site ls
 ```
+
+## How `read` Resolves URLs
+
+| URL Pattern | Strategy |
+|---|---|
+| `/path`, `./path`, `file://` | Direct file read |
+| `github://owner/repo@ref/path` | GitHub Contents API |
+| `https://github.com/.../blob/...` | Auto-converted to GitHub API |
+| Any `https://` (text/markdown/JSON/XML) | Direct fetch |
+| Any `https://` (HTML/SPA) | Cloudflare Browser Rendering fallback |
+
+## Authentication
+
+```bash
+ctx auth login ctx7          # Context7 (OAuth PKCE, opens browser)
+ctx auth login cloudflare    # Cloudflare Browser Rendering
+ctx auth status              # check what's configured
+```
+
+GitHub reads use your `gh auth` token automatically.
+
+## Agent Integration
+
+ctx ships with a [skill definition](skills/ctx/SKILL.md) for AI agents (Claude Code, Cursor, etc.) that teaches them the full search → read → navigate → scrape workflow. Install it with your agent's skill mechanism.
 
 ## Environment Variables
 
 | Variable | Purpose |
-|----------|---------|
+|---|---|
 | `GITHUB_TOKEN` / `GH_TOKEN` | GitHub API token (fallback: `gh auth token`) |
 | `CONTEXT7_BASE_URL` | Override Context7 API base URL |
 | `CONTEXT7_API_KEY` | Context7 API key (alternative to OAuth) |
-
-## AI Agent Integration
-
-The `skills/ctx/` directory contains a SKILL.md for Claude Code / Cursor / similar tools. Install it with your agent's skill mechanism.
