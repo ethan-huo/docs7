@@ -1,7 +1,7 @@
 ---
 name: ctx
 description: >-
-  Search and read documentation for libraries, frameworks, SDKs, and APIs by name and query.
+  The `ctx` command, Search and read documentation for libraries, frameworks, SDKs, and APIs by name and query.
   Read any URL or local file as clean markdown (GitHub repos, doc sites, JS-rendered SPAs).
   Navigate large documents with TOC and section extraction.
   Screenshot webpages, extract links, scrape elements by CSS selector, extract structured
@@ -32,16 +32,17 @@ Use `ctx search <name> [query]` first if you need to find the right library.
 ctx read <url>
 ```
 
-| Flag | Short | Default | Description |
-|---|---|---|---|
-| (positional) | | optional | URL or local path (`https://`, `github://`, `file://`, `/path`, `./path`) |
-| `--full` | `-f` | false | Force full JS rendering (skip HTTP attempt) |
-| `--no-cache` | | false | Bypass cache, always fetch fresh |
-| `--toc` | | false | Show heading outline with section numbers and line counts |
-| `--section` | `-s` | | Section(s) to extract (e.g. `1`, `1-3`, `1.2,3.1`) |
-| `--data` | `-d` | | CF API request body (JSON5, `@file`, or stdin). Implies `-f`. |
+| Flag         | Short | Default  | Description                                                               |
+| ------------ | ----- | -------- | ------------------------------------------------------------------------- |
+| (positional) |       | optional | URL or local path (`https://`, `github://`, `file://`, `/path`, `./path`) |
+| `--full`     | `-f`  | false    | Force full JS rendering (skip HTTP attempt)                               |
+| `--no-cache` |       | false    | Bypass cache, always fetch fresh                                          |
+| `--toc`      |       | false    | Show heading outline with section numbers and line counts                 |
+| `--section`  | `-s`  |          | Section(s) to extract (e.g. `1`, `1-3`, `1.2,3.1`)                        |
+| `--data`     | `-d`  |          | CF API request body (JSON5, `@file`, or stdin). Implies `-f`.             |
 
 Auto-detects URL type and fetches accordingly:
+
 - Local file / `file://` → direct read (always full content, no summary)
 - `github://owner/repo@ref/path` → GitHub API (supports `@ref` for versioned docs)
 - `https://github.com/.../blob/...` → GitHub API (auto-converted)
@@ -57,6 +58,7 @@ ctx read -d '{url: "https://example.com", addScriptTag: [{content: "document.bod
 ```
 
 To find the right selector, probe the page first:
+
 1. `ctx scrape <url> -s "main" -s "article" -s ".content"` — try common selectors, see which returns the content you need
 2. Use the matched selector in `addScriptTag` to override the default cleanup
 
@@ -84,6 +86,7 @@ npm install ctx-render
 ```
 
 **How to work with summaries**:
+
 1. Read the summary to understand the full document structure
 2. Use `-s` to read the sections you need: `ctx read <url> -s 2.1`
 3. Combine sections: `ctx read <url> -s "1-3,5.2"`
@@ -95,17 +98,18 @@ Use `--toc` for a compact outline without previews.
 
 Start with `ctx read`. Escalate when it's not enough:
 
-| Situation | Tool | Example |
-|---|---|---|
-| Need one page's full content | `ctx read <url>` | Read a doc page |
-| Page is too long (>2000 lines) | `ctx read <url> -s <section>` | Navigate via structural summary |
-| Only need specific elements from a page | `ctx scrape <url> -s "selector"` | Extract an API table, skip sidebar noise |
-| Need content from many pages on one site | `ctx crawl <url> --limit N` | Pull an entire docs section |
-| Don't know which pages to read | `ctx links <url>` then `ctx read` | Explore site structure first |
-| Need visual info (UI, charts, layouts) | `ctx screenshot <url>` | Inspect rendered page |
-| Need structured data extraction | `ctx json <url> --prompt "..."` | Extract pricing tiers as JSON |
+| Situation                                | Tool                              | Example                                  |
+| ---------------------------------------- | --------------------------------- | ---------------------------------------- |
+| Need one page's full content             | `ctx read <url>`                  | Read a doc page                          |
+| Page is too long (>2000 lines)           | `ctx read <url> -s <section>`     | Navigate via structural summary          |
+| Only need specific elements from a page  | `ctx scrape <url> -s "selector"`  | Extract an API table, skip sidebar noise |
+| Need content from many pages on one site | `ctx crawl <url> --limit N`       | Pull an entire docs section              |
+| Don't know which pages to read           | `ctx links <url>` then `ctx read` | Explore site structure first             |
+| Need visual info (UI, charts, layouts)   | `ctx screenshot <url>`            | Inspect rendered page                    |
+| Need structured data extraction          | `ctx json <url> --prompt "..."`   | Extract pricing tiers as JSON            |
 
 Common compositions:
+
 - **Docs research**: `ctx docs <lib> "<query>"` → `ctx read <url>` → `ctx read <url> -s N` for deep sections
 - **Full-site understanding**: `ctx crawl <url> --limit 20 --depth 2` (replaces manual links + read loop)
 - **Surgical extraction**: `ctx read <url> --toc` to find target → `ctx scrape <url> -s "table.params"` to extract it
@@ -114,13 +118,13 @@ Common compositions:
 
 These commands require `ctx auth login cloudflare`. Each has a dedicated reference — read it before first use:
 
-| Command | Use when | Reference |
-|---|---|---|
-| `ctx screenshot <url>` | Need visual information (UI, charts, layouts) | references/screenshot.md |
-| `ctx links <url>` | Explore a site's link structure before reading | references/links.md |
-| `ctx scrape <url> -s "selector"` | Extract specific elements (tables, code blocks) | references/scrape.md |
-| `ctx json <url> --prompt "..."` | Extract structured data as JSON | references/json.md |
-| `ctx crawl <url>` | Pull multiple pages from a documentation site | references/crawl.md |
+| Command                          | Use when                                        | Reference                |
+| -------------------------------- | ----------------------------------------------- | ------------------------ |
+| `ctx screenshot <url>`           | Need visual information (UI, charts, layouts)   | references/screenshot.md |
+| `ctx links <url>`                | Explore a site's link structure before reading  | references/links.md      |
+| `ctx scrape <url> -s "selector"` | Extract specific elements (tables, code blocks) | references/scrape.md     |
+| `ctx json <url> --prompt "..."`  | Extract structured data as JSON                 | references/json.md       |
+| `ctx crawl <url>`                | Pull multiple pages from a documentation site   | references/crawl.md      |
 
 All commands support `-d` for full API request body (JSON5, `@file`, or stdin). Flags override `-d` fields.
 
@@ -129,6 +133,7 @@ All commands support `-d` for full API request body (JSON5, `@file`, or stdin). 
 When you need to manage site authentication (cookies, headers), cache TTL, or viewport defaults, read references/settings.md.
 
 Common pattern: user provides cookies/auth for a site → store as site headers → all subsequent requests are authenticated:
+
 ```bash
 ctx site set example.com Cookie "sid=abc; token=xyz"
 ```
