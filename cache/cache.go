@@ -46,10 +46,11 @@ func statePath() string {
 	return filepath.Join(Dir(), "state.json")
 }
 
-// Key builds a cache key from one or more parts (e.g., operation + URL + params).
+// Key builds a short cache key from one or more parts (e.g., operation + URL + params).
+// Truncated to 12 hex chars (48 bits) — collision-safe for ≤100 entries.
 func Key(parts ...string) string {
 	h := sha256.Sum256([]byte(join(parts)))
-	return fmt.Sprintf("%x", h)
+	return fmt.Sprintf("%x", h[:6]) // 6 bytes = 12 hex chars
 }
 
 func join(parts []string) string {
