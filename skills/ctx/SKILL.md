@@ -35,11 +35,10 @@ ctx read <url>
 | Flag         | Short | Default  | Description                                                               |
 | ------------ | ----- | -------- | ------------------------------------------------------------------------- |
 | (positional) |       | optional | URL or local path (`https://`, `github://`, `file://`, `/path`, `./path`) |
-| `--full`     | `-f`  | false    | Force full JS rendering (skip HTTP attempt)                               |
 | `--no-cache` |       | false    | Bypass cache, always fetch fresh                                          |
 | `--toc`      |       | false    | Show heading outline with section numbers and line counts                 |
 | `--section`  | `-s`  |          | Section(s) to extract (e.g. `1`, `1-3`, `1.2,3.1`)                        |
-| `--data`     | `-d`  |          | CF API request body (JSON5, `@file`, or stdin). Implies `-f`.             |
+| `--data`     | `-d`  |          | CF API request body (JSON5, `@file`, or stdin)                            |
 
 Auto-detects URL type and fetches accordingly:
 
@@ -47,7 +46,7 @@ Auto-detects URL type and fetches accordingly:
 - `github://owner/repo@ref/path` → GitHub API (supports `@ref` for versioned docs)
 - `https://github.com/.../blob/...` → GitHub API (auto-converted)
 - `https://...` (markdown/text/JSON/XML/YAML) → direct fetch
-- `https://...` (HTML/SPA) → full JS rendering fallback; use `-f` to skip the HTTP attempt
+- `https://...` (HTML/SPA) → auto JS rendering fallback via Cloudflare
 
 When rendering via Cloudflare, a content-density heuristic automatically strips navigation, sidebar, header, and footer noise. This works for most sites without any configuration.
 

@@ -19,8 +19,8 @@ Design principle: **Agent Experience (AX) first**. An agent calling `ctx read` m
 | 1 | Starts with `file://`, `/`, `./`, `../`, `~/` | **local-file** | Direct filesystem read |
 | 2 | Starts with `github://` | **github-scheme** | GitHub Contents API |
 | 3 | Host is `github.com` AND path contains `/blob/` | **github-blob** | GitHub Contents API (best-effort ref parsing) |
-| 4 | Starts with `http://` or `https://`, `-f` flag set | **cf-direct** | Cloudflare Browser Rendering |
-| 5 | Starts with `http://` or `https://` | **http-negotiate** | HTTP with content negotiation → CF fallback |
+| 4 | Starts with `http://` or `https://`, `-d` body provided | **cf-direct** | Cloudflare Browser Rendering |
+| 5 | Starts with `http://` or `https://` | **http-negotiate** | HTTP with content negotiation → auto CF fallback |
 | 6 | None of the above | **error** | Reject with usage hint |
 
 Rules are evaluated top-down. A `github.com` URL without `/blob/` (e.g. repo root, tree URL) falls through to rule 4 or 5.
@@ -64,11 +64,11 @@ For simple refs (no `/`): both URL formats work identically.
 - Auth: `GITHUB_TOKEN` env → `GH_TOKEN` env → `gh auth token` CLI fallback → anonymous.
 - **No `looksIncomplete` check.** GitHub returns authoritative content; short files are valid.
 
-### 2.3 cf-direct (with `-f` flag)
+### 2.3 cf-direct (with `-d` body)
 
-- Build request body via merge pipeline (settings → site headers → overrides).
+- Build request body via merge pipeline (settings → site headers → `-d` body → overrides).
 - Call CF Browser Rendering `/markdown` endpoint.
-- **No `looksIncomplete` check.** CF already performed full JS rendering. If the result is still sparse, the issue is the page itself (paywall, anti-bot, empty page), not a rendering failure. Suggesting `-f` when CF was already used would create an infinite retry loop.
+- **No `looksIncomplete` check.** CF already performed full JS rendering. If the result is still sparse, the issue is the page itself (paywall, anti-bot, empty page).
 
 ### 2.4 http-negotiate
 
@@ -89,13 +89,13 @@ Two-phase fetch:
 - **Source = `http`** for all Phase 1 accepted responses.
 - On HTTP error (non-2xx): return error immediately. Do NOT fall through to Phase 2.
 
-**Phase 2: Cloudflare fallback**
-- Log `HTML response, rendering via Cloudflare...` to **stderr**.
+**Phase 2: Cloudflare fallback** (triggered by HTML response OR `looksIncomplete` content)
+- Log `HTML response, rendering via Cloudflare...` or `Content looks incomplete, rendering via Cloudflare...` to **stderr**.
 - Build request body via merge pipeline.
 - Call CF Browser Rendering `/markdown` endpoint. **Source = `cloudflare`**.
 - On CF credential error: return actionable error.
 
-**`looksIncomplete` applies to source=`http` only.** Source `cloudflare` never gets this check (see 2.3 rationale). Source `github` never gets this check (see 2.2).
+**`looksIncomplete` auto-retries with CF.** If Phase 1 returns text content that looks incomplete (< 500 chars, or contains JS-required signals like "enable javascript", "loading..."), Phase 2 kicks in automatically. No manual `-f` flag needed.
 
 ---
 
@@ -231,33 +231,30 @@ This is enforced by:
 
 ## 4. Hint Rules
 
-### 4.1 Core principle: never suggest an action the agent already took
+### 4.1 Core principle: auto-recover, don't hint
 
-This is the single rule that prevents retry loops. Before emitting any hint, check the `source` field:
-- If source = `cloudflare`: do NOT suggest `-f`. CF was already used.
-- If source = `github`: do NOT suggest `-f` or `--no-cache`. GitHub API is authoritative.
-- If source = `http`: suggesting `-f` is valid.
+The old approach was to hint "re-run with `-f`" — this wasted a round-trip. Now:
+- **`looksIncomplete` content**: auto-retries with CF rendering (no hint needed).
+- **HTML response**: auto-falls back to CF rendering (no hint needed).
+- **Empty content after CF**: hint with possible causes (stderr). No actionable retry exists.
 
 ### 4.2 When NOT to hint
 
 - **local-file**: never. The file is what it is.
 - **github-scheme / github-blob**: never. GitHub API returns authoritative content.
-- **cf-direct / cloudflare fallback**: never for content quality. CF already did full rendering.
+- **After auto-retry**: never for content quality. CF already did full rendering.
 
 ### 4.3 Hint table (all go to stderr)
 
 | Condition | Applies to source | Hint (stderr) |
 |---|---|---|
-| `looksIncomplete(content)` is true | `http` only | `Content may be incomplete (JS-rendered page). Re-run with: ctx read -f {url}` |
-| Content is empty string | `http` | `No content returned for {url}. Possible causes: authentication required, anti-bot protection, or empty page. Try: ctx read -f {url}` |
-| Content is empty string | `cloudflare` | `No content returned for {url}. Possible causes: authentication required (ctx site set {domain} ...), anti-bot protection, or the page is genuinely empty.` |
+| Content is empty string | any | `No content returned for {url}. Possible causes: authentication required (ctx site set {domain} ...), anti-bot protection, or the page is genuinely empty.` |
 | Content is empty string | `github` | (no hint — GitHub 404 is an error, not empty content; empty file is valid) |
 
 ### 4.4 Hint content rules
 
-1. **Every hint must contain an executable command** where applicable. Not "try again" but `ctx read -f {url}`.
-2. **Hints go to stderr only.** They never appear on stdout.
-3. **Empty content is not a diagnosis.** List possible causes instead of assuming authentication.
+1. **Hints go to stderr only.** They never appear on stdout.
+2. **Empty content is not a diagnosis.** List possible causes instead of assuming authentication.
 
 ---
 
@@ -308,8 +305,6 @@ Error messages must be:
 | `--toc` | Output TOC only. No truncation. No hints. |
 | `-s 1.2` | Output section(s) only. No truncation. No hints. |
 | `--toc -s 1.2` | `--toc` wins (checked first). |
-| `-f` | Force CF rendering. Skip HTTP negotiation. |
-| `-f --no-cache` | Force CF + bypass cache. |
 | `--no-cache` | Bypass cache lookup, but still store result. |
 | `--no-cache --toc` | Fresh fetch, then output TOC. |
 
@@ -324,11 +319,11 @@ Input
   │                                                           │
   ├─ github-scheme/blob ─── fetchGitHub(path, ref) ──────────┤
   │                                                           │
-  ├─ cf-direct (-f) ─── BuildRequestBody → CF /markdown ─────┤
+  ├─ cf-direct (-d) ─── BuildRequestBody → CF /markdown ─────┤
   │                                                           │
-  └─ http-negotiate ─── fetchHTTP ──┬─ md/text/json/xml ─────┤
+  └─ http-negotiate ─── fetchHTTP ──┬─ complete text ─────────┤
                                     │                         │
-                                    └─ html ─── CF fallback ──┤
+                                    └─ html/incomplete ── CF ──┤
                                                               │
                                               ┌───────────────┘
                                               │
@@ -462,23 +457,14 @@ EXIT:   0
 NOTE:   looksIncomplete is NOT checked (source=cloudflare)
 ```
 
-### 9.4 SPA with `-f`
-
-```
-INPUT:  ctx read -f https://spa.example.com/app
-STDOUT: <CF-rendered content>
-STDERR: (empty)
-EXIT:   0
-NOTE:   looksIncomplete is NOT checked (source=cloudflare)
-```
-
-### 9.5 Incomplete HTTP content
+### 9.4 Incomplete HTTP content → auto CF retry
 
 ```
 INPUT:  ctx read https://example.com/page  (returns text/plain, 200 chars with "loading..." signal)
-STDOUT: <short content, clean, no hint appended>
-STDERR: Content may be incomplete (JS-rendered page). Re-run with: ctx read -f https://example.com/page
+STDOUT: <CF-rendered content>
+STDERR: Content looks incomplete, rendering via Cloudflare...
 EXIT:   0
+NOTE:   looksIncomplete triggered auto-retry via CF. No manual -f needed.
 ```
 
 ### 9.6 Long document → structural summary
@@ -556,32 +542,23 @@ STDERR: no sections matched "99" — use: ctx read https://example.com/doc --toc
 EXIT:   1
 ```
 
-### 9.9 CF not configured
+### 9.9 CF not configured (auto-fallback path)
 
 ```
-INPUT:  ctx read -f https://example.com  (no CF credentials)
+INPUT:  ctx read https://spa.example.com  (HTTP returns HTML, CF not configured)
 STDOUT: (empty)
-STDERR: cloudflare not configured — run: ctx auth login cloudflare
+STDERR: HTML response, rendering via Cloudflare...
+        cloudflare not configured — run: ctx auth login cloudflare
 EXIT:   1
 ```
 
 ### 9.10 Empty content
 
 ```
-INPUT:  ctx read -f https://protected.example.com  (CF returns empty string)
+INPUT:  ctx read https://protected.example.com  (CF returns empty string after auto-fallback)
 STDOUT: (empty)
 STDERR: No content returned for https://protected.example.com.
         Possible causes: authentication required (ctx site set protected.example.com ...),
         anti-bot protection, or the page is genuinely empty.
 EXIT:   0
-```
-
-```
-INPUT:  ctx read https://weird.example.com  (HTTP returns text/plain, empty body)
-STDOUT: (empty)
-STDERR: No content returned for https://weird.example.com.
-        Possible causes: authentication required, anti-bot protection, or empty page.
-        Try: ctx read -f https://weird.example.com
-EXIT:   0
-NOTE:   source=http, so "-f" suggestion is valid (not a retry loop)
 ```

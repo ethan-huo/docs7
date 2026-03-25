@@ -24,7 +24,6 @@ import (
 type ReadCmd struct {
 	cfrender.DataFlag
 	URL     string `arg:"" help:"URL or local path to read (github://, https://, file://, or path)" optional:""`
-	Full    bool   `short:"f" help:"Use Cloudflare Browser Rendering for full JS-rendered content" default:"false"`
 	NoCache bool   `help:"Bypass cache, always fetch fresh"`
 	TOC     bool   `help:"Show heading outline with section numbers"`
 	Section string `short:"s" help:"Section(s) to extract (e.g. 1, 1-3, 1.2,3.1-5.1,6.2)"`
@@ -39,11 +38,6 @@ func (c *ReadCmd) Run(_ *api.Client) error {
 	}
 
 	url := c.URL
-
-	// -d implies -f (CF rendering)
-	if dataBody != nil {
-		c.Full = true
-	}
 
 	// Local file — direct read, no cache, no hints, no summary
 	if url != "" {
@@ -94,20 +88,9 @@ func (c *ReadCmd) Run(_ *api.Client) error {
 		Source: source,
 	})
 
-	// Hints go to stderr only, per contract Section 4
-	// looksIncomplete only applies to source=http (not github, not cloudflare)
-	if source == "http" && looksIncomplete(content) {
-		fmt.Fprintf(os.Stderr, "Content may be incomplete (JS-rendered page). Re-run with: ctx read -f %s\n", target)
-	}
-
-	// Empty content hints (stderr), per source
+	// Empty content hint (stderr)
 	if strings.TrimSpace(content) == "" {
-		switch source {
-		case "http":
-			fmt.Fprintf(os.Stderr, "No content returned for %s. Possible causes: authentication required, anti-bot protection, or empty page. Try: ctx read -f %s\n", target, target)
-		case "cloudflare":
-			fmt.Fprintf(os.Stderr, "No content returned for %s. Possible causes: authentication required (ctx site set %s ...), anti-bot protection, or the page is genuinely empty.\n", target, extractDomainFromURL(target))
-		}
+		fmt.Fprintf(os.Stderr, "No content returned for %s. Possible causes: authentication required (ctx site set %s ...), anti-bot protection, or the page is genuinely empty.\n", target, extractDomainFromURL(target))
 	}
 
 	content = skillReferencesHint(target, content)
@@ -172,24 +155,30 @@ func (c *ReadCmd) fetch(url string, dataBody []byte) (string, string, error) {
 		}
 	}
 
-	// -f flag or -d provided: Cloudflare Browser Rendering
-	if c.Full {
+	// -d provided: direct Cloudflare rendering with custom body
+	if dataBody != nil {
 		content, err := fetchCloudflare(url, dataBody)
 		return content, "cloudflare", err
 	}
 
-	// Default: HTTP with markdown negotiation, CF fallback for HTML
+	// Default: HTTP with markdown negotiation
 	content, err := fetchHTTP(url)
 	if err != nil {
 		return "", "", err
 	}
-	if content != "" {
+
+	// Good text content that looks complete — use it.
+	if content != "" && !looksIncomplete(content) {
 		return content, "http", nil
 	}
 
-	// HTML response — fallback to Cloudflare Browser Rendering
-	fmt.Fprintf(os.Stderr, "HTML response, rendering via Cloudflare...\n")
-	content, err = fetchCloudflare(url, dataBody)
+	// HTML response or incomplete content — fallback to CF rendering.
+	if content != "" {
+		fmt.Fprintf(os.Stderr, "Content looks incomplete, rendering via Cloudflare...\n")
+	} else {
+		fmt.Fprintf(os.Stderr, "HTML response, rendering via Cloudflare...\n")
+	}
+	content, err = fetchCloudflare(url, nil)
 	return content, "cloudflare", err
 }
 

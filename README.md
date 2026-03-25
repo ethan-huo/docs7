@@ -58,7 +58,7 @@ When plain HTTP isn't enough, ctx uses [Cloudflare Browser Rendering](https://de
 
 | Need | Command |
 |---|---|
-| Read a JS-rendered SPA | `ctx read -f <url>` |
+| Read a JS-rendered SPA | `ctx read <url>` |
 | Extract specific DOM elements | `ctx scrape <url> -s "table.api-params"` |
 | Pull multiple pages from a docs site | `ctx crawl <url> --limit 50 --depth 2` |
 | Screenshot a page | `ctx screenshot <url> --full-page` |
