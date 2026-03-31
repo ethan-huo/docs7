@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,13 +24,40 @@ import (
 
 type ReadCmd struct {
 	cfrender.DataFlag
-	URL     string `arg:"" help:"URL or local path to read (github://, https://, file://, or path)" optional:""`
-	NoCache bool   `help:"Bypass cache, always fetch fresh"`
-	TOC     bool   `help:"Show heading outline with section numbers"`
-	Section string `short:"s" help:"Section(s) to extract (e.g. 1, 1-3, 1.2,3.1-5.1,6.2)"`
+	URL      string `arg:"" help:"URL or local path to read (github://, https://, file://, or path)" optional:""`
+	NoCache  bool   `help:"Bypass cache, always fetch fresh"`
+	TOC      bool   `help:"Show heading outline with section numbers"`
+	Section  string `short:"s" help:"Section(s) to extract (e.g. 1, 1-3, 1.2,3.1-5.1,6.2)"`
+	Comments string `help:"Issue comment range to include (e.g. 1-3, all)"`
 }
 
 const summaryThreshold = 2000
+const issueCommentAutoLineBudget = 1500
+
+type gitHubIssueTarget struct {
+	Owner     string
+	Repo      string
+	Number    int
+	Canonical string
+}
+
+type gitHubIssueDocument struct {
+	Title    string
+	Body     string
+	Comments []gitHubIssueComment
+}
+
+type gitHubIssueComment struct {
+	Author string
+	Body   string
+}
+
+type issueCommentSelector struct {
+	All   bool
+	Start int
+	End   int
+	Label string
+}
 
 func (c *ReadCmd) Run(_ *api.Client) error {
 	dataBody, err := c.ParseBody()
@@ -59,6 +87,17 @@ func (c *ReadCmd) Run(_ *api.Client) error {
 	target := url
 	if target == "" && dataBody != nil {
 		target = effectiveURL("", dataBody)
+	}
+
+	issueTarget, isIssueTarget, err := parseGitHubIssueTarget(target)
+	if err != nil {
+		return err
+	}
+	if c.Comments != "" && !isIssueTarget {
+		return fmt.Errorf("--comments is only supported for GitHub issue targets")
+	}
+	if isIssueTarget {
+		return c.runGitHubIssue(target, issueTarget)
 	}
 
 	var cacheKey string
@@ -95,6 +134,52 @@ func (c *ReadCmd) Run(_ *api.Client) error {
 
 	content = skillReferencesHint(target, content)
 	return c.output(cache.Path(cacheKey, ".md"), target, content, true)
+}
+
+func (c *ReadCmd) runGitHubIssue(target string, issueTarget gitHubIssueTarget) error {
+	if c.URL == "" {
+		return fmt.Errorf("GitHub issue targets are not supported with -d body input")
+	}
+
+	selector, err := parseIssueCommentSelector(c.Comments)
+	if err != nil {
+		return err
+	}
+
+	cacheMode := "auto"
+	if selector.All {
+		cacheMode = "all"
+	} else if selector.Label != "" {
+		cacheMode = selector.Label
+	}
+	cacheKey := cache.Key("markdown", issueTarget.Canonical, "comments="+cacheMode)
+
+	if !c.NoCache {
+		if data, _, ok := cache.Lookup(cacheKey, ".md"); ok {
+			return c.output(cache.Path(cacheKey, ".md"), issueTarget.Canonical, string(data), false)
+		}
+	}
+
+	doc, err := fetchGitHubIssueDocument(issueTarget)
+	if err != nil {
+		return err
+	}
+
+	content, err := renderGitHubIssue(doc, issueTarget.Canonical, selector)
+	if err != nil {
+		return err
+	}
+
+	_ = cache.Store(cacheKey, []byte(content), ".md", cache.Meta{
+		URL:    issueTarget.Canonical,
+		Source: "github-issue",
+	})
+
+	if strings.TrimSpace(content) == "" {
+		fmt.Fprintf(os.Stderr, "No content returned for %s.\n", issueTarget.Canonical)
+	}
+
+	return c.output(cache.Path(cacheKey, ".md"), issueTarget.Canonical, content, false)
 }
 
 // skillReferencesHint appends a reference discovery hint when reading a GitHub-hosted SKILL.md.
@@ -150,6 +235,17 @@ func (c *ReadCmd) fetch(url string, dataBody []byte) (string, string, error) {
 							"Try: ctx read github://%s/%s@<ref>/%s\n",
 						ref, parts[0], parts[1], parts[2])
 				}
+			}
+			return content, "github", err
+		}
+		if owner, repo, ref, ok := parseGitHubRepoReadmeURL(url); ok {
+			content, err := fetchGitHubReadme(owner, repo, ref)
+			if err != nil && ref != "" && strings.Contains(err.Error(), "GitHub API 404") {
+				// tree/<ref> has the same slash-ref ambiguity as blob/<ref>/path.
+				fmt.Fprintf(os.Stderr,
+					"Note: if the branch name contains '/', ref %q may have been parsed incorrectly.\n"+
+						"Try: ctx read github://%s/%s@<ref>/README.md\n",
+					ref, owner, repo)
 			}
 			return content, "github", err
 		}
@@ -233,12 +329,247 @@ func (c *ReadCmd) output(contentPath, target, content string, allowSummary bool)
 	return nil
 }
 
-// canonicalizeURL normalizes GitHub blob URLs to github:// form for cache key consistency.
+func parseIssueCommentSelector(raw string) (issueCommentSelector, error) {
+	if strings.TrimSpace(raw) == "" {
+		return issueCommentSelector{}, nil
+	}
+	trimmed := strings.TrimSpace(raw)
+	if strings.EqualFold(trimmed, "all") {
+		return issueCommentSelector{All: true, Label: "all"}, nil
+	}
+	if strings.Contains(trimmed, ",") {
+		return issueCommentSelector{}, fmt.Errorf("invalid comment range %q (expected 3, 1-3, or all)", raw)
+	}
+	if strings.Contains(trimmed, "-") {
+		parts := strings.SplitN(trimmed, "-", 2)
+		start, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+		if err != nil || start < 1 {
+			return issueCommentSelector{}, fmt.Errorf("invalid comment range %q (expected positive numbers)", raw)
+		}
+		end, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+		if err != nil || end < start {
+			return issueCommentSelector{}, fmt.Errorf("invalid comment range %q (expected start-end with end >= start)", raw)
+		}
+		return issueCommentSelector{Start: start, End: end, Label: fmt.Sprintf("%d-%d", start, end)}, nil
+	}
+	n, err := strconv.Atoi(trimmed)
+	if err != nil || n < 1 {
+		return issueCommentSelector{}, fmt.Errorf("invalid comment range %q (expected 3, 1-3, or all)", raw)
+	}
+	return issueCommentSelector{Start: n, End: n, Label: trimmed}, nil
+}
+
+func parseGitHubIssueTarget(raw string) (gitHubIssueTarget, bool, error) {
+	if strings.HasPrefix(raw, "github://") {
+		path, ref := parseGitHubScheme(strings.TrimPrefix(raw, "github://"))
+		parts := strings.Split(path, "/")
+		if len(parts) != 4 || parts[2] != "issues" {
+			return gitHubIssueTarget{}, false, nil
+		}
+		if ref != "" {
+			return gitHubIssueTarget{}, false, fmt.Errorf("GitHub issue targets do not support refs; use github://owner/repo/issues/<id>")
+		}
+		number, err := strconv.Atoi(parts[3])
+		if err != nil || number < 1 {
+			return gitHubIssueTarget{}, false, fmt.Errorf("invalid GitHub issue target %q", raw)
+		}
+		return gitHubIssueTarget{
+			Owner:     parts[0],
+			Repo:      parts[1],
+			Number:    number,
+			Canonical: fmt.Sprintf("github://%s/%s/issues/%d", parts[0], parts[1], number),
+		}, true, nil
+	}
+
+	u, err := url.Parse(raw)
+	if err != nil || u.Host != "github.com" {
+		return gitHubIssueTarget{}, false, nil
+	}
+	parts := strings.Split(strings.Trim(strings.TrimSpace(u.Path), "/"), "/")
+	if len(parts) != 4 || parts[2] != "issues" {
+		return gitHubIssueTarget{}, false, nil
+	}
+	number, err := strconv.Atoi(parts[3])
+	if err != nil || number < 1 {
+		return gitHubIssueTarget{}, false, fmt.Errorf("invalid GitHub issue target %q", raw)
+	}
+	return gitHubIssueTarget{
+		Owner:     parts[0],
+		Repo:      parts[1],
+		Number:    number,
+		Canonical: fmt.Sprintf("github://%s/%s/issues/%d", parts[0], parts[1], number),
+	}, true, nil
+}
+
+func fetchGitHubIssueDocument(target gitHubIssueTarget) (gitHubIssueDocument, error) {
+	var issue struct {
+		Title string `json:"title"`
+		Body  string `json:"body"`
+	}
+	issueURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/issues/%d", target.Owner, target.Repo, target.Number)
+	if err := fetchGitHubJSON(issueURL, &issue); err != nil {
+		return gitHubIssueDocument{}, err
+	}
+
+	var comments []gitHubIssueComment
+	for page := 1; ; page++ {
+		apiURL := fmt.Sprintf(
+			"https://api.github.com/repos/%s/%s/issues/%d/comments?per_page=100&page=%d",
+			target.Owner, target.Repo, target.Number, page,
+		)
+		var pageComments []struct {
+			Body string `json:"body"`
+			User struct {
+				Login string `json:"login"`
+			} `json:"user"`
+		}
+		if err := fetchGitHubJSON(apiURL, &pageComments); err != nil {
+			return gitHubIssueDocument{}, err
+		}
+		for _, comment := range pageComments {
+			comments = append(comments, gitHubIssueComment{
+				Author: comment.User.Login,
+				Body:   comment.Body,
+			})
+		}
+		if len(pageComments) < 100 {
+			break
+		}
+	}
+
+	return gitHubIssueDocument{
+		Title:    issue.Title,
+		Body:     issue.Body,
+		Comments: comments,
+	}, nil
+}
+
+func renderGitHubIssue(doc gitHubIssueDocument, canonicalTarget string, selector issueCommentSelector) (string, error) {
+	var b strings.Builder
+	writeIssueHeader(&b, doc)
+
+	if len(doc.Comments) == 0 {
+		return b.String(), nil
+	}
+
+	start := 1
+	end := len(doc.Comments)
+	if !selector.All && selector.Label != "" {
+		if selector.Start > len(doc.Comments) {
+			return "", fmt.Errorf("comment range %s is out of bounds; issue has %d comments", selector.Label, len(doc.Comments))
+		}
+		start = selector.Start
+		end = selector.End
+		if end > len(doc.Comments) {
+			end = len(doc.Comments)
+		}
+		writeIssueComments(&b, doc.Comments, start, end)
+		return b.String(), nil
+	}
+	if selector.All {
+		writeIssueComments(&b, doc.Comments, start, end)
+		return b.String(), nil
+	}
+
+	if countLines(b.String()) >= issueCommentAutoLineBudget {
+		writeIssueCommentHint(&b, canonicalTarget, 1, len(doc.Comments), len(doc.Comments))
+		return b.String(), nil
+	}
+
+	displayedEnd := 0
+	var commentBlocks []string
+	for i, comment := range doc.Comments {
+		block := formatIssueComment(i+1, comment)
+		next := strings.Join(commentBlocks, "") + block
+		candidate := b.String() + "\n---\n## Comments 1-" + strconv.Itoa(i+1) + "\n\n" + next
+		if countLines(candidate) > issueCommentAutoLineBudget {
+			break
+		}
+		commentBlocks = append(commentBlocks, block)
+		displayedEnd = i + 1
+	}
+
+	if displayedEnd > 0 {
+		b.WriteString("\n---\n")
+		fmt.Fprintf(&b, "## Comments 1-%d\n\n", displayedEnd)
+		for _, block := range commentBlocks {
+			b.WriteString(block)
+		}
+	}
+	if displayedEnd < len(doc.Comments) {
+		writeIssueCommentHint(&b, canonicalTarget, displayedEnd+1, len(doc.Comments), displayedEnd)
+	}
+
+	return b.String(), nil
+}
+
+func writeIssueHeader(b *strings.Builder, doc gitHubIssueDocument) {
+	fmt.Fprintf(b, "# %s\n\n", strings.TrimSpace(doc.Title))
+	body := strings.TrimSpace(doc.Body)
+	if body != "" {
+		b.WriteString(body)
+		b.WriteString("\n")
+	}
+}
+
+func writeIssueComments(b *strings.Builder, comments []gitHubIssueComment, start, end int) {
+	b.WriteString("\n---\n")
+	if start == end {
+		fmt.Fprintf(b, "## Comment %d\n\n", start)
+	} else {
+		fmt.Fprintf(b, "## Comments %d-%d\n\n", start, end)
+	}
+	for i := start - 1; i < end; i++ {
+		b.WriteString(formatIssueComment(i+1, comments[i]))
+	}
+}
+
+func formatIssueComment(index int, comment gitHubIssueComment) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "@%s:\n", comment.Author)
+	body := strings.TrimSpace(comment.Body)
+	if body != "" {
+		b.WriteString(body)
+	} else {
+		b.WriteString("(empty comment)")
+	}
+	b.WriteString("\n\n---\n\n")
+	return b.String()
+}
+
+func writeIssueCommentHint(b *strings.Builder, canonicalTarget string, nextStart, total, shown int) {
+	if nextStart > total {
+		return
+	}
+	if !strings.HasSuffix(b.String(), "\n") {
+		b.WriteString("\n")
+	}
+	b.WriteString("---\n")
+	fmt.Fprintf(b,
+		"[ctx:comments] 已显示 %d/%d 条评论。继续读取：\nctx read %s --comments %d-%d\n",
+		shown, total, canonicalTarget, nextStart, total,
+	)
+}
+
+func countLines(s string) int {
+	if s == "" {
+		return 0
+	}
+	return strings.Count(s, "\n") + 1
+}
+
+// canonicalizeURL normalizes GitHub URLs to github:// form for cache key consistency.
 // When a ref is present, the format is github://owner/repo@ref/path.
 func canonicalizeURL(url string) string {
 	if strings.Contains(url, "github.com") {
 		if path, ref, ok := parseGitHubBlobURL(url); ok {
 			return formatGitHubScheme(path, ref)
+		}
+		if issueTarget, ok, err := parseGitHubIssueTarget(url); err == nil && ok {
+			return issueTarget.Canonical
+		}
+		if owner, repo, ref, ok := parseGitHubRepoReadmeURL(url); ok {
+			return formatGitHubScheme(owner+"/"+repo+"/README.md", ref)
 		}
 	}
 	return url
@@ -289,30 +620,23 @@ func fetchGitHub(path, ref string) (string, error) {
 	if ref != "" {
 		apiURL += "?ref=" + ref
 	}
+	return fetchGitHubContent(apiURL)
+}
 
-	req, err := http.NewRequest("GET", apiURL, nil)
-	if err != nil {
-		return "", err
+func fetchGitHubReadme(owner, repo, ref string) (string, error) {
+	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/readme", owner, repo)
+	if ref != "" {
+		apiURL += "?ref=" + url.QueryEscape(ref)
 	}
-	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	return fetchGitHubContent(apiURL)
+}
 
-	if token := ghToken(); token != "" {
-		req.Header.Set("Authorization", "token "+token)
-	}
-
-	resp, err := httpClient.Do(req)
+func fetchGitHubContent(apiURL string) (string, error) {
+	resp, err := doGitHubAPIRequest(apiURL)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		body, _ := io.ReadAll(resp.Body)
-		if resp.StatusCode == 403 && strings.Contains(string(body), "rate limit") {
-			return "", fmt.Errorf("GitHub API rate limited. Set GITHUB_TOKEN or run: gh auth login")
-		}
-		return "", fmt.Errorf("GitHub API %d: %s", resp.StatusCode, string(body))
-	}
 
 	var result struct {
 		Content  string `json:"content"`
@@ -333,6 +657,42 @@ func fetchGitHub(path, ref string) (string, error) {
 	}
 
 	return result.Content, nil
+}
+
+func fetchGitHubJSON(apiURL string, dest any) error {
+	resp, err := doGitHubAPIRequest(apiURL)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	return json.NewDecoder(resp.Body).Decode(dest)
+}
+
+func doGitHubAPIRequest(apiURL string) (*http.Response, error) {
+	req, err := http.NewRequest("GET", apiURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+
+	if token := ghToken(); token != "" {
+		req.Header.Set("Authorization", "token "+token)
+	}
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode == 403 && strings.Contains(string(body), "rate limit") {
+			return nil, fmt.Errorf("GitHub API rate limited. Set GITHUB_TOKEN or run: gh auth login")
+		}
+		return nil, fmt.Errorf("GitHub API %d: %s", resp.StatusCode, string(body))
+	}
+	return resp, nil
 }
 
 func fetchHTTP(url string) (string, error) {
@@ -472,6 +832,38 @@ func parseGitHubBlobURL(rawURL string) (path string, ref string, ok bool) {
 		rest = rest[:idx]
 	}
 	return repo + "/" + rest, ref, true
+}
+
+func parseGitHubRepoReadmeURL(rawURL string) (owner string, repo string, ref string, ok bool) {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "", "", "", false
+	}
+	if u.Host != "github.com" {
+		return "", "", "", false
+	}
+
+	trimmed := strings.Trim(strings.TrimSpace(u.Path), "/")
+	parts := strings.Split(trimmed, "/")
+	if len(parts) < 2 {
+		return "", "", "", false
+	}
+	owner, repo = parts[0], parts[1]
+	if owner == "" || repo == "" {
+		return "", "", "", false
+	}
+
+	// Repo root: https://github.com/owner/repo
+	if len(parts) == 2 {
+		return owner, repo, "", true
+	}
+
+	// Explicit root ref: https://github.com/owner/repo/tree/<ref>
+	if len(parts) == 4 && parts[2] == "tree" {
+		return owner, repo, parts[3], true
+	}
+
+	return "", "", "", false
 }
 
 func ghToken() string {

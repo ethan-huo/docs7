@@ -19,11 +19,13 @@ Design principle: **Agent Experience (AX) first**. An agent calling `ctx read` m
 | 1 | Starts with `file://`, `/`, `./`, `../`, `~/` | **local-file** | Direct filesystem read |
 | 2 | Starts with `github://` | **github-scheme** | GitHub Contents API |
 | 3 | Host is `github.com` AND path contains `/blob/` | **github-blob** | GitHub Contents API (best-effort ref parsing) |
-| 4 | Starts with `http://` or `https://`, `-d` body provided | **cf-direct** | Cloudflare Browser Rendering |
-| 5 | Starts with `http://` or `https://` | **http-negotiate** | HTTP with content negotiation → auto CF fallback |
-| 6 | None of the above | **error** | Reject with usage hint |
+| 4 | Host is `github.com` AND path is repo root or `tree/<ref>` root | **github-readme** | GitHub README API |
+| 5 | Host is `github.com` AND path matches `/issues/<id>` | **github-issue** | GitHub Issues API + comments |
+| 6 | Starts with `http://` or `https://`, `-d` body provided | **cf-direct** | Cloudflare Browser Rendering |
+| 7 | Starts with `http://` or `https://` | **http-negotiate** | HTTP with content negotiation → auto CF fallback |
+| 8 | None of the above | **error** | Reject with usage hint |
 
-Rules are evaluated top-down. A `github.com` URL without `/blob/` (e.g. repo root, tree URL) falls through to rule 4 or 5.
+Rules are evaluated top-down. GitHub repo roots are resolved to the repository README instead of falling through to generic HTML rendering.
 
 ---
 
@@ -37,12 +39,14 @@ Rules are evaluated top-down. A `github.com` URL without `/blob/` (e.g. repo roo
 - `--toc` and `-s` still work on local files (heading-based navigation).
 - Error on missing file: `file not found: <path>`
 
-### 2.2 github-scheme / github-blob
+### 2.2 github-scheme / github-blob / github-readme
 
 **Ref handling:**
 
 - `github://owner/repo@ref/path` — ref is the string between `@` and the next `/`. This is unambiguous because `@` is not valid in GitHub repository names.
 - `https://github.com/owner/repo/blob/<ref>/path` — ref is parsed as the **first path segment** after `/blob/`.
+- `https://github.com/owner/repo` — resolves to the repository README on the default branch.
+- `https://github.com/owner/repo/tree/<ref>` — resolves to the repository README for that ref.
 
 **Slash-ref detection and rejection:**
 
@@ -53,24 +57,44 @@ On GitHub API 404, the error is returned as-is (the file may genuinely not exist
 - **Exit**: 1 (the original 404 error)
 - **stderr note** (additive, not replacing the error): `Note: if the branch name contains '/', ref "X" may have been parsed incorrectly. Try: ctx read github://owner/repo@<ref>/path`
 
+For `tree/<ref>` URLs, the same slash-ref ambiguity applies, but the retry target becomes `ctx read github://owner/repo@<ref>/README.md`.
+
 This avoids turning a clear "not found" into a misleading "ref ambiguity" diagnosis. The note is secondary context, not a rewritten error.
 
 The `github://` scheme supports refs containing `/` via URL-encoding: `github://owner/repo@feature%2Fauth/path`. The `@` marker unambiguously delimits the ref start; `%2F` within the ref prevents confusion with path separators. The ref is URL-decoded before being passed to the API.
 
 For simple refs (no `/`): both URL formats work identically.
 
-**API call:**
+**API calls:**
 - `GET /repos/{owner}/{repo}/contents/{path}?ref={ref}`
+- `GET /repos/{owner}/{repo}/readme?ref={ref}` for repo-root README resolution
 - Auth: `GITHUB_TOKEN` env → `GH_TOKEN` env → `gh auth token` CLI fallback → anonymous.
 - **No `looksIncomplete` check.** GitHub returns authoritative content; short files are valid.
 
-### 2.3 cf-direct (with `-d` body)
+### 2.3 github-issue
+
+- Accepted inputs:
+  - `https://github.com/owner/repo/issues/123`
+  - `github://owner/repo/issues/123`
+- Refs are not supported for issue targets. `github://owner/repo@main/issues/123` is rejected.
+- API calls:
+  - `GET /repos/{owner}/{repo}/issues/{id}`
+  - `GET /repos/{owner}/{repo}/issues/{id}/comments?per_page=100&page=N`
+- Default mode is **budgeted expansion**:
+  - Always include issue title and body.
+  - Append as many comments as fit within the issue render budget.
+  - If not all comments fit, append a continuation hint: `ctx read github://owner/repo/issues/123 --comments X-Y`
+- `--comments 1-3` reads a specific inclusive range.
+- `--comments all` forces all comments to be rendered.
+- Issue rendering never uses the structural-summary mode. The issue-specific continuation hint replaces it.
+
+### 2.4 cf-direct (with `-d` body)
 
 - Build request body via merge pipeline (settings → site headers → `-d` body → overrides).
 - Call CF Browser Rendering `/markdown` endpoint.
 - **No `looksIncomplete` check.** CF already performed full JS rendering. If the result is still sparse, the issue is the page itself (paywall, anti-bot, empty page).
 
-### 2.4 http-negotiate
+### 2.5 http-negotiate
 
 Two-phase fetch:
 
@@ -241,7 +265,7 @@ The old approach was to hint "re-run with `-f`" — this wasted a round-trip. No
 ### 4.2 When NOT to hint
 
 - **local-file**: never. The file is what it is.
-- **github-scheme / github-blob**: never. GitHub API returns authoritative content.
+- **github-scheme / github-blob / github-readme / github-issue**: never. GitHub API returns authoritative content.
 - **After auto-retry**: never for content quality. CF already did full rendering.
 
 ### 4.3 Hint table (all go to stderr)

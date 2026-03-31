@@ -93,8 +93,12 @@ ctx site ls
 | `/path`, `./path`, `file://` | Direct file read |
 | `github://owner/repo@ref/path` | GitHub Contents API |
 | `https://github.com/.../blob/...` | Auto-converted to GitHub API |
+| `https://github.com/owner/repo` | Auto-resolved to repository README |
+| `https://github.com/owner/repo/issues/123` | Auto-resolved to issue title/body/comments |
 | Any `https://` (text/markdown/JSON/XML) | Direct fetch |
 | Any `https://` (HTML/SPA) | Cloudflare Browser Rendering fallback |
+
+Issue reads auto-expand comments until a line budget is reached, then append a continuation hint like `ctx read github://owner/repo/issues/123 --comments 9-20`. Use `--comments 1-3` or `--comments all` to override.
 
 ## Authentication
 

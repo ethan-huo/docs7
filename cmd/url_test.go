@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -104,6 +105,136 @@ func TestParseGitHubBlobURL(t *testing.T) {
 	}
 }
 
+func TestParseGitHubRepoReadmeURL(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantOwner string
+		wantRepo  string
+		wantRef   string
+		wantOK    bool
+	}{
+		{
+			name:      "plain repo root",
+			input:     "https://github.com/vercel-labs/portless",
+			wantOwner: "vercel-labs",
+			wantRepo:  "portless",
+			wantRef:   "",
+			wantOK:    true,
+		},
+		{
+			name:      "repo root with trailing slash and fragment",
+			input:     "https://github.com/vercel-labs/portless/#readme",
+			wantOwner: "vercel-labs",
+			wantRepo:  "portless",
+			wantRef:   "",
+			wantOK:    true,
+		},
+		{
+			name:      "tree root with explicit ref",
+			input:     "https://github.com/vercel-labs/portless/tree/main",
+			wantOwner: "vercel-labs",
+			wantRepo:  "portless",
+			wantRef:   "main",
+			wantOK:    true,
+		},
+		{
+			name:   "repo subpage is not readme target",
+			input:  "https://github.com/vercel-labs/portless/issues",
+			wantOK: false,
+		},
+		{
+			name:   "blob URL is handled elsewhere",
+			input:  "https://github.com/vercel-labs/portless/blob/main/README.md",
+			wantOK: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			owner, repo, ref, ok := parseGitHubRepoReadmeURL(tt.input)
+			if ok != tt.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tt.wantOK)
+			}
+			if !ok {
+				return
+			}
+			if owner != tt.wantOwner {
+				t.Errorf("owner = %q, want %q", owner, tt.wantOwner)
+			}
+			if repo != tt.wantRepo {
+				t.Errorf("repo = %q, want %q", repo, tt.wantRepo)
+			}
+			if ref != tt.wantRef {
+				t.Errorf("ref = %q, want %q", ref, tt.wantRef)
+			}
+		})
+	}
+}
+
+func TestParseGitHubIssueTarget(t *testing.T) {
+	tests := []struct {
+		name          string
+		input         string
+		wantCanonical string
+		wantNumber    int
+		wantOK        bool
+		wantErr       string
+	}{
+		{
+			name:          "github issue url",
+			input:         "https://github.com/vercel-labs/portless/issues/12",
+			wantCanonical: "github://vercel-labs/portless/issues/12",
+			wantNumber:    12,
+			wantOK:        true,
+		},
+		{
+			name:          "github issue scheme",
+			input:         "github://vercel-labs/portless/issues/12",
+			wantCanonical: "github://vercel-labs/portless/issues/12",
+			wantNumber:    12,
+			wantOK:        true,
+		},
+		{
+			name:    "refs are rejected for issue targets",
+			input:   "github://vercel-labs/portless@main/issues/12",
+			wantErr: "do not support refs",
+		},
+		{
+			name:   "non issue github url",
+			input:  "https://github.com/vercel-labs/portless/pull/12",
+			wantOK: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			target, ok, err := parseGitHubIssueTarget(tt.input)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err = %v, want substring %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected err: %v", err)
+			}
+			if ok != tt.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tt.wantOK)
+			}
+			if !ok {
+				return
+			}
+			if target.Canonical != tt.wantCanonical {
+				t.Fatalf("canonical = %q, want %q", target.Canonical, tt.wantCanonical)
+			}
+			if target.Number != tt.wantNumber {
+				t.Fatalf("number = %d, want %d", target.Number, tt.wantNumber)
+			}
+		})
+	}
+}
+
 // ===== formatGitHubScheme + parseGitHubScheme round-trip =====
 
 func TestGitHubSchemeRoundTrip(t *testing.T) {
@@ -151,10 +282,23 @@ func TestCanonicalizeURL(t *testing.T) {
 			"https://github.com/o/r/blob/v2.0/src/lib.go",
 			"github://o/r@v2.0/src/lib.go",
 		},
-		// Non-blob github URL stays as-is
+		// Repo roots resolve to the repository README.
 		{
 			"https://github.com/owner/repo",
-			"https://github.com/owner/repo",
+			"github://owner/repo/README.md",
+		},
+		{
+			"https://github.com/owner/repo/tree/main",
+			"github://owner/repo@main/README.md",
+		},
+		{
+			"https://github.com/owner/repo/issues/12",
+			"github://owner/repo/issues/12",
+		},
+		// Non-read github URL stays as-is
+		{
+			"https://github.com/owner/repo/issues",
+			"https://github.com/owner/repo/issues",
 		},
 		// Non-github URL stays as-is
 		{
@@ -246,12 +390,16 @@ func TestNormalizeURL(t *testing.T) {
 			"github://o/r@main/file.md",
 		},
 		{
-			"https://docs.example.com/guide",
-			"https://docs.example.com/guide",
+			"https://github.com/owner/repo",
+			"github://owner/repo/README.md",
 		},
 		{
-			"https://github.com/owner/repo",
-			"https://github.com/owner/repo",
+			"https://github.com/owner/repo/issues/12",
+			"github://owner/repo/issues/12",
+		},
+		{
+			"https://docs.example.com/guide",
+			"https://docs.example.com/guide",
 		},
 	}
 
@@ -300,8 +448,8 @@ func TestIsDirectlyReadable(t *testing.T) {
 		{"application/xml", true},
 		{"text/xml", true},
 		{"application/yaml", true},
-		{"text/csv", true},           // generic text/* accepted
-		{"text/html", false},         // needs browser rendering
+		{"text/csv", true},   // generic text/* accepted
+		{"text/html", false}, // needs browser rendering
 		{"text/html; charset=utf-8", false},
 		{"application/octet-stream", false},
 		{"image/png", false},

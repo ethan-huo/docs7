@@ -122,11 +122,5 @@ func isRealURL(u string) bool {
 // normalizeURL converts GitHub blob URLs to github:// scheme (preserving ref),
 // keeps everything else as-is.
 func normalizeURL(rawURL string) string {
-	if !strings.Contains(rawURL, "github.com") {
-		return rawURL
-	}
-	if path, ref, ok := parseGitHubBlobURL(rawURL); ok {
-		return formatGitHubScheme(path, ref)
-	}
-	return rawURL
+	return canonicalizeURL(rawURL)
 }

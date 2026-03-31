@@ -45,6 +45,7 @@ ctx read <url>
 | `--no-cache` |       | false    | Bypass cache, always fetch fresh                                          |
 | `--toc`      |       | false    | Show heading outline with section numbers and line counts                 |
 | `--section`  | `-s`  |          | Section(s) to extract (e.g. `1`, `1-3`, `1.2,3.1`)                        |
+| `--comments` |       |          | GitHub issue comments to include (`1-3`, `7`, `all`)                     |
 | `--data`     | `-d`  |          | CF API request body (JSON5, `@file`, or stdin)                            |
 
 Auto-detects URL type and fetches accordingly:
@@ -52,8 +53,18 @@ Auto-detects URL type and fetches accordingly:
 - Local file / `file://` → direct read (always full content, no summary)
 - `github://owner/repo@ref/path` → GitHub API (supports `@ref` for versioned docs)
 - `https://github.com/.../blob/...` → GitHub API (auto-converted)
+- `https://github.com/owner/repo` → repository README via GitHub API
+- `https://github.com/owner/repo/issues/123` or `github://owner/repo/issues/123` → issue title/body/comments via GitHub API
 - `https://...` (markdown/text/JSON/XML/YAML) → direct fetch
 - `https://...` (HTML/SPA) → auto JS rendering fallback via Cloudflare
+
+GitHub issue reads are smart by default:
+
+- `ctx read https://github.com/owner/repo/issues/123` returns title + body + as many comments as fit
+- If comments exceed the budget, `ctx` appends a continuation hint like `ctx read github://owner/repo/issues/123 --comments 9-20`
+- Use `--comments 1-3` for a precise range, or `--comments all` to force all comments
+
+Prefer the default command first. Only add `--comments` when the issue is large or you need an exact slice.
 
 When rendering via Cloudflare, a content-density heuristic automatically strips navigation, sidebar, header, and footer noise. This works for most sites without any configuration.
 
