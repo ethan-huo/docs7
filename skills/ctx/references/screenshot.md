@@ -43,7 +43,11 @@ Use `--scroll N` to navigate long pages. Subsequent `--scroll` calls reuse the c
 - Need to verify how a rendered page looks
 - Use `--scroll` to see content below the fold, guided by the metadata output
 
+Default viewport is 1440×900 (desktop). No need to specify it for typical use.
+
 ## Full API control
+
+Override viewport for mobile testing or custom dimensions:
 
 ```bash
 ctx screenshot -d '{

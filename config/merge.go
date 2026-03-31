@@ -45,7 +45,13 @@ func BuildRequestBody(endpoint string, targetURL string, dataBody []byte, flagOv
 		deepMerge(merged, settings.Defaults)
 	}
 
-	// Layer 1.5: Default DOM cleanup for markdown endpoint.
+	// Layer 1.5: Sensible default viewport.
+	// Puppeteer's 800×600 is too small for modern pages. 1440×900 is a
+	// reasonable desktop viewport that shows enough content per screen.
+	// Lowest priority — overridden by settings, -d body, or CLI flags.
+	injectDefaultViewport(merged)
+
+	// Layer 1.6: Default DOM cleanup for markdown endpoint.
 	// Three-phase script: semantic container → guarded density → subtractive.
 	// See cleanup.js for the full strategy and rationale.
 	if endpoint == "markdown" {
@@ -120,6 +126,17 @@ func injectDefaultCleanup(merged map[string]any) {
 		merged["addScriptTag"] = append(existing, tag)
 	} else {
 		merged["addScriptTag"] = []any{tag}
+	}
+}
+
+// injectDefaultViewport sets a 1440×900 viewport unless one is already present.
+func injectDefaultViewport(merged map[string]any) {
+	if _, ok := merged["viewport"]; ok {
+		return
+	}
+	merged["viewport"] = map[string]any{
+		"width":  1440,
+		"height": 900,
 	}
 }
 
