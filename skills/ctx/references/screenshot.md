@@ -43,6 +43,24 @@ Use `--scroll N` to navigate long pages. Subsequent `--scroll` calls reuse the c
 - Need to verify how a rendered page looks
 - Use `--scroll` to see content below the fold, guided by the metadata output
 
+## Content-focused screenshots with --selector
+
+Use `--selector` to capture only the main content, skipping navigation, ads, and footer:
+
+```bash
+ctx screenshot <url> --selector "main"
+ctx screenshot <url> --selector "article"
+ctx screenshot <url> --selector ".content"
+```
+
+Common content selectors: `main`, `article`, `.content`, `#content`, `[role="main"]`.
+
+If unsure which selector to use, probe first:
+```bash
+ctx scrape <url> -s "main" -s "article" -s ".content" --text-only
+```
+Then use whichever returns the right content. `--selector` bypasses the smart split/scroll logic (captures the element as-is).
+
 Default viewport is 1440×900 (desktop). No need to specify it for typical use.
 
 ## Full API control

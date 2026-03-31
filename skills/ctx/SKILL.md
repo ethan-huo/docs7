@@ -100,7 +100,7 @@ Use `--toc` for a compact outline without previews.
 
 ## Choosing the right tool
 
-Start with `ctx read`. Escalate when it's not enough:
+**Explore before acting.** When facing an unfamiliar site, start with `ctx read` or `ctx links` to understand what's there, then decide which tool fits.
 
 | Situation                                | Tool                              | Example                                  |
 | ---------------------------------------- | --------------------------------- | ---------------------------------------- |
@@ -110,6 +110,7 @@ Start with `ctx read`. Escalate when it's not enough:
 | Need content from many pages on one site | `ctx crawl <url> --limit N`       | Pull an entire docs section              |
 | Don't know which pages to read           | `ctx links <url>` then `ctx read` | Explore site structure first             |
 | Need visual info (UI, charts, layouts)   | `ctx screenshot <url>`            | Inspect rendered page; `--scroll 900` for below-the-fold |
+| Screenshot only content, skip nav/ads    | `ctx screenshot <url> --selector "main"` | Common: `main`, `article`, `.content`, `#content` |
 | Need structured data extraction          | `ctx json <url> --prompt "..."`   | Extract pricing tiers as JSON            |
 
 Common compositions:
@@ -117,6 +118,7 @@ Common compositions:
 - **Docs research**: `ctx docs <lib> "<query>"` → `ctx read <url>` → `ctx read <url> -s N` for deep sections
 - **Full-site understanding**: `ctx crawl <url> --limit 20 --depth 2` (replaces manual links + read loop)
 - **Surgical extraction**: `ctx read <url> --toc` to find target → `ctx scrape <url> -s "table.params"` to extract it
+- **Content-focused screenshot**: `ctx scrape <url> -s "main" -s "article"` to find the right selector → `ctx screenshot <url> --selector "article"`
 
 ## Browser Rendering Commands
 
