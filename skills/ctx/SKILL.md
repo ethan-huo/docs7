@@ -49,10 +49,13 @@ Auto-detects URL type and fetches accordingly:
 - Local file / `file://` → direct read (always full content, no summary)
 - `github://owner/repo@ref/path` → GitHub API (supports `@ref` for versioned docs)
 - `https://github.com/.../blob/...` → GitHub API (auto-converted)
+- `https://github.com/.../tree/<ref>/<path>` → GitHub directory listing via GitHub API (`[ctx:github-dir]` header + `ls`-style entries)
 - `https://github.com/owner/repo` → repository README via GitHub API
 - `https://github.com/owner/repo/issues/123` or `github://owner/repo/issues/123` → issue title/body/comments via GitHub API
 - `https://...` (markdown/text/JSON/XML/YAML) → direct fetch
 - `https://...` (HTML/SPA) → auto JS rendering fallback via Cloudflare
+
+If `ctx read` returns `[ctx:github-dir]`, treat it as a navigable directory listing. Pick a child entry and re-run `ctx read` against that child path instead of trying to interpret it as prose.
 
 GitHub issue reads are smart by default:
 
