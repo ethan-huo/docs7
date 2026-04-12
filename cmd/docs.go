@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"strings"
 
 	"github.com/ethan-huo/ctx/api"
@@ -39,23 +41,7 @@ func (c *DocsCmd) Run(client *api.Client) error {
 		return nil
 	}
 
-	// Items
-	for i, src := range sources {
-		fmt.Printf("%d. **%s**\n", i+1, src.title)
-		for j, desc := range src.descriptions {
-			if j >= 3 {
-				break
-			}
-			fmt.Printf("   - %s\n", desc)
-		}
-	}
-
-	// Hints
-	fmt.Println("\n---")
-	fmt.Println("Use `ctx read <url>` to fetch full documents:")
-	for _, src := range sources {
-		fmt.Printf("- %s\n", src.url)
-	}
+	renderDocSources(os.Stdout, sources)
 
 	return nil
 }
@@ -123,4 +109,31 @@ func isRealURL(u string) bool {
 // keeps everything else as-is.
 func normalizeURL(rawURL string) string {
 	return canonicalizeURL(rawURL)
+}
+
+func renderDocSources(w io.Writer, sources []docSource) {
+	for i, src := range sources {
+		if i > 0 {
+			fmt.Fprintln(w)
+		}
+		heading := docSourceHeading(src)
+		fmt.Fprintf(w, "## %d. %s\n", i+1, heading)
+		for j, desc := range src.descriptions {
+			if j >= 3 {
+				break
+			}
+			fmt.Fprintf(w, "- %s\n", desc)
+		}
+	}
+
+	fmt.Fprintln(w, "\n---")
+	fmt.Fprintln(w, "Use `ctx read <url>` to fetch full documents.")
+}
+
+func docSourceHeading(src docSource) string {
+	title := strings.TrimSpace(src.title)
+	if title == "" || strings.EqualFold(title, "unknown") {
+		return src.url
+	}
+	return fmt.Sprintf("[%s](%s)", title, src.url)
 }
